@@ -20,7 +20,13 @@ export const REDACTED = '[redacted]';
 const SENSITIVE_KEY_PATTERN =
   /(password|passwd|secret|token|api[-_]?key|authorization|auth[-_]?header|cookie|session[-_]?id|credential|private[-_]?key|encryption[-_]?key|service[-_]?role)/i;
 
-/** Field names that read as sensitive but are safe and useful in an audit. */
+/**
+ * Field names that read as sensitive but are safe and useful in an audit.
+ *
+ * The Browserbase session id belongs here: it identifies a session, it is not
+ * a credential, it is already a column in browser_sessions, and redacting it
+ * would make the browser history unreadable for no gain.
+ */
 const ALLOWED_KEYS = new Set([
   'passwordDelivered',
   'password_delivered',
@@ -30,6 +36,9 @@ const ALLOWED_KEYS = new Set([
   'password_source',
   'tokenCount',
   'token_count',
+  'browserSessionId',
+  'browserbase_session_id',
+  'browserbaseSessionId',
 ]);
 
 export function isSensitiveKey(key: string): boolean {

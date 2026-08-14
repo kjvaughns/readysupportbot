@@ -81,11 +81,9 @@ export async function searchAgents(page: Page, term: string): Promise<ReadymodeA
     await searchBox.press('Enter').catch(() => undefined);
   }
 
-  await page.waitForLoadState('networkidle').catch(() => undefined);
-
-  if (await isVisibleIfConfigured(page, 'agents.results.empty.marker', 2_000)) {
-    return [];
-  }
+  // Bounded deliberately: a page that never goes fully quiet should not hold a
+  // job for the whole navigation timeout. The row wait below is the real check.
+  await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => undefined);
 
   const rows = locate(page, 'agents.results.row');
 
@@ -94,10 +92,12 @@ export async function searchAgents(page: Page, term: string): Promise<ReadymodeA
     await rows.first().waitFor({ state: 'visible', timeout: 8_000 });
     count = await rows.count();
   } catch {
-    // No rows and no "nothing found" marker. That is an empty result, not a
-    // broken page — but it is worth noting, because a mapped empty marker
-    // would make this unambiguous.
-    log.debug({ term }, 'Search returned no rows and no empty-state marker');
+    // No rows appeared. When an empty-state marker is mapped, confirm that is
+    // what happened rather than a page that failed to render.
+    const emptyState = await isVisibleIfConfigured(page, 'agents.results.empty.marker', 2_000);
+    if (!emptyState) {
+      log.debug({ term }, 'Search returned no rows and no empty-state marker');
+    }
     return [];
   }
 
@@ -130,12 +130,24 @@ export async function openAgentAtIndex(page: Page, index: number): Promise<void>
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
 }
 
-/** Interpret a status cell without inventing meaning that is not there. */
+/**
+ * Interpret a status cell without inventing meaning that is not there.
+ *
+ * Negatives are checked first, and that ordering is load-bearing. English
+ * status text buries the positive inside the negative: "Deactivated" contains
+ * "active", "No license assigned" contains "assigned", "Not on a call"
+ * contains "on a call". Checking positives first reads every one of those
+ * backwards — and reading "deactivated" as active is exactly how a workflow
+ * concludes it succeeded when it did nothing at all.
+ *
+ * Text matching neither list returns undefined, which callers treat as "could
+ * not determine" and refuse to act on.
+ */
 function readsAs(text: string | undefined, positives: string[], negatives: string[]): boolean | undefined {
   if (!text) return undefined;
   const normalized = text.toLowerCase();
-  if (positives.some((word) => normalized.includes(word))) return true;
-  if (negatives.some((word) => normalized.includes(word))) return false;
+  if (negatives.some((phrase) => normalized.includes(phrase))) return false;
+  if (positives.some((phrase) => normalized.includes(phrase))) return true;
   return undefined;
 }
 
@@ -178,10 +190,26 @@ export async function readAgentDetail(page: Page): Promise<ReadymodeAccount> {
     cell(page.locator('body'), 'agent.detail.callState'),
   ]);
 
-  const active = readsAs(activeText, ['active', 'enabled'], ['inactive', 'deactivated', 'disabled']);
-  const licenseInUse = readsAs(licenseText, ['in use', 'assigned', 'active'], ['none', 'not assigned', 'unassigned', 'available']);
-  const loggedIn = readsAs(loginText, ['logged in', 'signed in', 'online'], ['logged out', 'signed out', 'offline']);
-  const onCall = readsAs(callText, ['on call', 'in call', 'talking', 'connected'], ['idle', 'available', 'not on a call']);
+  const active = readsAs(
+    activeText,
+    ['active', 'enabled'],
+    ['inactive', 'deactivated', 'disabled', 'suspended'],
+  );
+  const licenseInUse = readsAs(
+    licenseText,
+    ['in use', 'assigned', 'active'],
+    ['no license', 'not assigned', 'unassigned', 'not in use', 'none', 'available'],
+  );
+  const loggedIn = readsAs(
+    loginText,
+    ['logged in', 'signed in', 'online'],
+    ['logged out', 'signed out', 'not logged in', 'offline'],
+  );
+  const onCall = readsAs(
+    callText,
+    ['on a call', 'on call', 'in call', 'talking', 'connected'],
+    ['not on a call', 'no call', 'idle', 'available'],
+  );
 
   return {
     ...(readymodeUserId ? { readymodeUserId } : {}),

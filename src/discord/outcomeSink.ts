@@ -6,7 +6,6 @@ import {
   type Client,
   type RepliableInteraction,
 } from 'discord.js';
-import { ACTION_LABELS } from '../domain/actions.js';
 import type { ExecutionOutcome } from '../queue/executor.js';
 import type { OutcomeSink } from '../queue/queue.js';
 import * as audit from '../audit/audit.js';

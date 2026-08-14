@@ -37,28 +37,33 @@ export type ProbeResult = AuthStatus['state'];
  * credentials into a challenge.
  */
 export async function probe(page: Page): Promise<{ state: ProbeResult; detail?: string }> {
-  if (await isVisibleIfConfigured(page, 'auth.captcha.marker', 2_000)) {
+  // All five markers are looked for at once. Checking them one after another
+  // would mean waiting out a full timeout for each absent one, and four of the
+  // five are absent on any given page — that is seconds added to every job for
+  // no information. The priority below is applied to the results, not to the
+  // order they are fetched in.
+  const [captcha, mfa, dashboard, login, expired] = await Promise.all([
+    isVisibleIfConfigured(page, 'auth.captcha.marker', 2_000),
+    isVisibleIfConfigured(page, 'auth.mfa.marker', 2_000),
+    isVisibleIfConfigured(page, 'page.dashboard.marker', 5_000),
+    isVisibleIfConfigured(page, 'page.login.marker', 2_000),
+    isVisibleIfConfigured(page, 'auth.expired.marker', 2_000),
+  ]);
+
+  // Verification wins over everything. A page can show a sign-in form *and* a
+  // CAPTCHA, and treating that as "just expired" would mean typing credentials
+  // into a challenge.
+  if (captcha) {
     return { state: 'VERIFICATION_REQUIRED', detail: 'Readymode is showing a CAPTCHA challenge.' };
   }
-
-  if (await isVisibleIfConfigured(page, 'auth.mfa.marker', 2_000)) {
-    return {
-      state: 'VERIFICATION_REQUIRED',
-      detail: 'Readymode is asking for a verification code.',
-    };
+  if (mfa) {
+    return { state: 'VERIFICATION_REQUIRED', detail: 'Readymode is asking for a verification code.' };
   }
 
-  if (await isVisibleIfConfigured(page, 'page.dashboard.marker', 5_000)) {
-    return { state: 'AUTHENTICATED' };
-  }
+  if (dashboard) return { state: 'AUTHENTICATED' };
 
-  if (await isVisibleIfConfigured(page, 'page.login.marker', 2_000)) {
-    return { state: 'EXPIRED', detail: 'Readymode is showing the sign-in page.' };
-  }
-
-  if (await isVisibleIfConfigured(page, 'auth.expired.marker', 2_000)) {
-    return { state: 'EXPIRED', detail: 'Readymode says the session has expired.' };
-  }
+  if (login) return { state: 'EXPIRED', detail: 'Readymode is showing the sign-in page.' };
+  if (expired) return { state: 'EXPIRED', detail: 'Readymode says the session has expired.' };
 
   return {
     state: 'UNKNOWN',

@@ -117,18 +117,18 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
   ),
   'page.agentDetail.marker': selector(
     'page.agentDetail.marker',
-    "Something present only on a single agent's page.",
+    "Something present only on one agent's own page, e.g. their username heading.",
   ),
   'page.agentCreate.marker': selector(
     'page.agentCreate.marker',
-    'Something present only on the new-agent form.',
+    'Something present only on the new-agent form, e.g. its heading or the submit button.',
   ),
   'page.licenses.marker': selector('page.licenses.marker', 'Something present only on the license view.'),
 
   // --- Authentication ------------------------------------------------------
-  'login.username.input': selector('login.username.input', 'Username field on the sign-in form.', 'label'),
-  'login.password.input': selector('login.password.input', 'Password field on the sign-in form.', 'label'),
-  'login.submit.button': selector('login.submit.button', 'The button that submits the sign-in form.'),
+  'login.username.input': selector('login.username.input', 'The username field on the Readymode admin sign-in form.', 'label'),
+  'login.password.input': selector('login.password.input', 'The password field on the Readymode admin sign-in form.', 'label'),
+  'login.submit.button': selector('login.submit.button', 'The button that submits the Readymode admin sign-in form.'),
   'login.error.marker': selector(
     'login.error.marker',
     'The message shown when sign-in is rejected, e.g. wrong username or password.',
@@ -151,19 +151,19 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
   ),
 
   // --- Agent list and search ----------------------------------------------
-  'agents.search.input': selector('agents.search.input', 'The search box on the agent list.', 'placeholder'),
+  'agents.search.input': selector('agents.search.input', 'The search box above the agent list, used to find one account by name, username or email.', 'placeholder'),
   'agents.search.submit': selector(
     'agents.search.submit',
     'The button that runs the search. Leave unmapped if the list filters as you type.',
   ),
   'agents.results.row': selector(
     'agents.results.row',
-    'One result row. Must match every row and nothing else — this is how results are counted.',
+    'One row of agent search results. Must match every row and nothing else, because this is how results are counted and a miscount would defeat the single-match rule.',
     'role',
   ),
   'agents.results.empty.marker': selector(
     'agents.results.empty.marker',
-    'The message shown when a search matches nothing.',
+    'The message the agent list shows when a search matches nothing at all.',
     'text',
   ),
   'agents.row.userId': selector('agents.row.userId', 'The Readymode user ID cell within a result row.', 'css'),
@@ -174,15 +174,15 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
   'agents.create.button': selector('agents.create.button', 'The button that opens the new-agent form.'),
 
   // --- Agent detail --------------------------------------------------------
-  'agent.detail.userId': selector('agent.detail.userId', 'Readymode user ID on the agent page.', 'css'),
-  'agent.detail.username': selector('agent.detail.username', 'Username on the agent page.', 'css'),
-  'agent.detail.email': selector('agent.detail.email', 'Email on the agent page.', 'css'),
-  'agent.detail.fullName': selector('agent.detail.fullName', 'Full name on the agent page.', 'css'),
-  'agent.detail.role': selector('agent.detail.role', 'Agent role on the agent page.', 'css'),
-  'agent.detail.licenseType': selector('agent.detail.licenseType', 'License type on the agent page.', 'css'),
-  'agent.detail.team': selector('agent.detail.team', 'Team on the agent page.', 'css'),
-  'agent.detail.campaign': selector('agent.detail.campaign', 'Campaign on the agent page.', 'css'),
-  'agent.detail.queue': selector('agent.detail.queue', 'Queue on the agent page.', 'css'),
+  'agent.detail.userId': selector('agent.detail.userId', 'Where the agent page shows the Readymode user ID for this account.', 'css'),
+  'agent.detail.username': selector('agent.detail.username', 'Where the agent page shows this account username.', 'css'),
+  'agent.detail.email': selector('agent.detail.email', 'Where the agent page shows this account email address.', 'css'),
+  'agent.detail.fullName': selector('agent.detail.fullName', 'Where the agent page shows this person full name.', 'css'),
+  'agent.detail.role': selector('agent.detail.role', 'Where the agent page shows the assigned agent role.', 'css'),
+  'agent.detail.licenseType': selector('agent.detail.licenseType', 'Where the agent page shows which license type this account holds.', 'css'),
+  'agent.detail.team': selector('agent.detail.team', 'Where the agent page shows the team this account belongs to.', 'css'),
+  'agent.detail.campaign': selector('agent.detail.campaign', 'Where the agent page shows the campaign this account is assigned to.', 'css'),
+  'agent.detail.queue': selector('agent.detail.queue', 'Where the agent page shows the queue this account is assigned to.', 'css'),
   'agent.detail.activeState': selector(
     'agent.detail.activeState',
     'Where the page shows whether the account is active or deactivated.',
@@ -205,23 +205,23 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
   ),
 
   // --- Create account ------------------------------------------------------
-  'create.firstName.input': selector('create.firstName.input', 'First name field.', 'label'),
-  'create.lastName.input': selector('create.lastName.input', 'Last name field.', 'label'),
-  'create.email.input': selector('create.email.input', 'Email field.', 'label'),
-  'create.username.input': selector('create.username.input', 'Username field.', 'label'),
-  'create.password.input': selector('create.password.input', 'Password field.', 'label'),
+  'create.firstName.input': selector('create.firstName.input', 'The first name field on the new-agent form.', 'label'),
+  'create.lastName.input': selector('create.lastName.input', 'The last name field on the new-agent form.', 'label'),
+  'create.email.input': selector('create.email.input', 'The email address field on the new-agent form.', 'label'),
+  'create.username.input': selector('create.username.input', 'The username field on the new-agent form.', 'label'),
+  'create.password.input': selector('create.password.input', 'The initial password field on the new-agent form.', 'label'),
   'create.passwordConfirm.input': selector(
     'create.passwordConfirm.input',
     'Confirm-password field, if the form has one.',
     'label',
   ),
-  'create.role.select': selector('create.role.select', 'Agent role selector.', 'label'),
-  'create.licenseType.select': selector('create.licenseType.select', 'License type selector.', 'label'),
-  'create.team.select': selector('create.team.select', 'Team selector.', 'label'),
-  'create.campaign.select': selector('create.campaign.select', 'Campaign selector.', 'label'),
-  'create.queue.select': selector('create.queue.select', 'Queue selector.', 'label'),
-  'create.active.toggle': selector('create.active.toggle', 'Active/enabled toggle.', 'label'),
-  'create.submit.button': selector('create.submit.button', 'The button that saves the new agent.'),
+  'create.role.select': selector('create.role.select', 'The control that picks the agent role on the new-agent form.', 'label'),
+  'create.licenseType.select': selector('create.licenseType.select', 'The control that picks the license type on the new-agent form.', 'label'),
+  'create.team.select': selector('create.team.select', 'The control that picks the team on the new-agent form. Leave unmapped if there is none.', 'label'),
+  'create.campaign.select': selector('create.campaign.select', 'The control that picks the campaign on the new-agent form. Leave unmapped if there is none.', 'label'),
+  'create.queue.select': selector('create.queue.select', 'The control that picks the queue on the new-agent form. Leave unmapped if there is none.', 'label'),
+  'create.active.toggle': selector('create.active.toggle', 'The control that decides whether the new account starts active.', 'label'),
+  'create.submit.button': selector('create.submit.button', 'The button that submits the new-agent form and creates the account.'),
   'create.success.marker': selector(
     'create.success.marker',
     'The confirmation Readymode shows after an account is created.',
@@ -253,13 +253,13 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
     'resetPassword.trigger.button',
     'The control that starts a password reset for the agent being viewed.',
   ),
-  'resetPassword.newPassword.input': selector('resetPassword.newPassword.input', 'New password field.', 'label'),
+  'resetPassword.newPassword.input': selector('resetPassword.newPassword.input', 'The new password field on the password reset form.', 'label'),
   'resetPassword.confirmPassword.input': selector(
     'resetPassword.confirmPassword.input',
     'Confirm new password field, if the form has one.',
     'label',
   ),
-  'resetPassword.submit.button': selector('resetPassword.submit.button', 'The button that saves the new password.'),
+  'resetPassword.submit.button': selector('resetPassword.submit.button', 'The button that submits the password reset form.'),
   'resetPassword.success.marker': selector(
     'resetPassword.success.marker',
     'The confirmation shown after a password is changed.',
@@ -271,7 +271,7 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
     'deactivate.trigger.button',
     'The control that deactivates the agent being viewed.',
   ),
-  'deactivate.confirm.button': selector('deactivate.confirm.button', 'The confirmation dialog button.'),
+  'deactivate.confirm.button': selector('deactivate.confirm.button', 'The button that confirms deactivation, if Readymode asks for confirmation.'),
   'deactivate.success.marker': selector(
     'deactivate.success.marker',
     'The confirmation shown after an account is deactivated.',
@@ -285,7 +285,7 @@ export const DEFAULT_SELECTORS: Record<string, SelectorSpec> = {
     'role',
   ),
   'licenses.row.agent': selector('licenses.row.agent', 'The agent name or username cell in a license row.', 'css'),
-  'licenses.row.licenseType': selector('licenses.row.licenseType', 'The license type cell.', 'css'),
+  'licenses.row.licenseType': selector('licenses.row.licenseType', 'The license type cell within a row of the license view.', 'css'),
   'licenses.row.status': selector('licenses.row.status', 'The status cell, e.g. signed in or on a call.', 'css'),
   'licenses.total.inUse': selector(
     'licenses.total.inUse',

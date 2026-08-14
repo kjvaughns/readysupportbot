@@ -299,7 +299,7 @@ export async function execute(
 
     return {
       request: failed,
-      action: action ?? fallbackAction(request),
+      action: action ?? fallbackAction(),
       succeeded: false,
       error,
       hasCredential: false,
@@ -413,7 +413,7 @@ async function recordFailure(
  * When rehydration itself failed there is no parsed action, but the outcome
  * still has to name what was attempted.
  */
-function fallbackAction(request: AutomationRequestRow): StructuredAction {
+function fallbackAction(): StructuredAction {
   return { action: 'LIST_RECENT_ACTIONS', limit: 1, status: 'ALL' } as StructuredAction & {
     action: 'LIST_RECENT_ACTIONS';
   };

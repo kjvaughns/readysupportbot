@@ -361,7 +361,7 @@ export class MockReadymodeService implements ReadymodeService {
 
   async checkLicenseUsage(
     action: CheckLicenseUsageAction,
-    context: WorkflowContext,
+    _context: WorkflowContext,
   ): Promise<WorkflowResult<LicenseUsage>> {
     this.guard();
 
@@ -386,7 +386,7 @@ export class MockReadymodeService implements ReadymodeService {
 
   async checkAgentStatus(
     action: CheckAgentStatusAction,
-    context: WorkflowContext,
+    _context: WorkflowContext,
   ): Promise<WorkflowResult<ReadymodeAccount>> {
     this.guard();
 

@@ -85,7 +85,8 @@ export async function resetPassword(
       }
 
       await locate(page, 'resetPassword.submit.button').first().click();
-      await page.waitForLoadState('networkidle').catch(() => undefined);
+      // Bounded: the success marker below is the real check.
+      await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => undefined);
 
       if (await isVisibleIfConfigured(page, 'create.validationError.marker', 2_000)) {
         throw errorFor('PRECONDITION_FAILED', {

@@ -127,6 +127,9 @@ export function sanitizeRequestText(raw: string): SanitizedRequest {
  * never sent to the model and never treated as an instruction.
  */
 export function sanitizeObservedText(raw: string, maxLength = 200): string {
-  const cleaned = stripInvisible(stripControlChars(raw)).replace(/\s+/g, ' ').trim();
+  // Whitespace is collapsed before control characters are stripped. The other
+  // order deletes the newline outright and welds the surrounding words
+  // together, which changes the text rather than just flattening it.
+  const cleaned = stripInvisible(stripControlChars(raw.replace(/\s+/g, ' '))).trim();
   return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 3)}...` : cleaned;
 }

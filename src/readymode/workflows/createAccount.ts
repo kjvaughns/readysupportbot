@@ -177,7 +177,9 @@ export async function createAccount(
       }
 
       await locate(page, 'create.submit.button').first().click();
-      await page.waitForLoadState('networkidle').catch(() => undefined);
+      // Bounded: the success marker and the follow-up search are the real
+      // checks, so a page that never goes fully quiet must not stall the job.
+      await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => undefined);
 
       // Readymode rejecting the form is a clean stop, not a failure to
       // investigate. Whatever it said is not repeated verbatim — a validation
