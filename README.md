@@ -115,6 +115,17 @@ directory of fictional agents.
 | [Deployment](docs/DEPLOYMENT.md) | Railway, Docker, going live |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | When something is not working |
 | [Database](supabase/README.md) | Migrations and schema |
+| [Dashboard brief](LOVABLE.md) | Building the web dashboard with Lovable |
+
+## The dashboard
+
+`design/readysupport-ui.html` is a working prototype of the web dashboard — open
+it in a browser and click through. [LOVABLE.md](LOVABLE.md) is the brief for
+turning it into a real app: design tokens, the data model, the row-level
+security policies it needs, and the boundaries it must not cross.
+
+The bot works on its own. The dashboard is a window onto it, not a second way to
+change accounts.
 
 ## Development
 
