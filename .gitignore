@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Verified Readymode selectors are environment-specific and captured by discovery.
+config/readymode-selectors.json
+
+# Discovery output may contain screenshots of real account data.
+discovery/
+
+# Local evidence captures
+evidence/
+.DS_Store
