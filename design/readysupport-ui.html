@@ -1,0 +1,3040 @@
+<title>ReadySupport Control Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+/* ==========================================================================
+   ReadySupport — design tokens
+
+   Single visual world on purpose: this is a light operations console, and the
+   brand pins white and very light grey as the ground. Every colour is painted
+   explicitly so the page holds on any host background.
+   ========================================================================== */
+:root {
+  /* Brand */
+  --brand:        #6D5DFB;
+  --brand-press:  #5B4BE0;
+  --brand-tint:   #F1EFFE;
+  --brand-tint-2: #E6E2FD;
+  --brand-line:   #D5CFFB;
+
+  /* Ground and ink. Neutrals lean cool to sit with the violet rather than
+     fight it — a warm grey next to #6D5DFB reads as an accident. */
+  --bg:           #F7F7F8;
+  --surface:      #FFFFFF;
+  --surface-2:    #FAFAFB;
+  --surface-3:    #F4F4F5;
+  --border:       #E5E7EB;
+  --border-strong:#D4D4D8;
+
+  --ink:          #18181B;
+  --ink-2:        #3F3F46;
+  --ink-3:        #71717A;
+  --ink-4:        #A1A1AA;
+
+  /* State. Kept separate from the accent: purple never means "good". */
+  --ok:           #16A34A;
+  --ok-tint:      #ECFDF3;
+  --ok-line:      #BBF7D0;
+  --warn:         #D97706;
+  --warn-tint:    #FFFBEB;
+  --warn-line:    #FDE68A;
+  --danger:       #DC2626;
+  --danger-tint:  #FEF2F2;
+  --danger-line:  #FECACA;
+
+  /* Elevation — barely there. Borders do the separating. */
+  --shadow-sm: 0 1px 2px rgba(24,24,27,.04);
+  --shadow:    0 1px 2px rgba(24,24,27,.04), 0 1px 3px rgba(24,24,27,.06);
+  --shadow-lg: 0 4px 6px -2px rgba(24,24,27,.04), 0 12px 24px -6px rgba(24,24,27,.10);
+  --shadow-xl: 0 8px 12px -4px rgba(24,24,27,.06), 0 24px 48px -12px rgba(24,24,27,.16);
+
+  --r-sm: 6px;
+  --r:    8px;
+  --r-md: 10px;
+  --r-lg: 14px;
+
+  /* Inter and Geist are requested first; the system grotesques are the
+     closest fallbacks when neither is installed. */
+  --font: "Inter", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+          "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono",
+          Menlo, Consolas, monospace;
+
+  --sidebar-w: 248px;
+  --topbar-h: 60px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv05" 1, "ss01" 1;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.014em; text-wrap: balance; }
+h1 { font-size: 22px; line-height: 1.25; letter-spacing: -0.02em; }
+h2 { font-size: 15px; line-height: 1.35; }
+h3 { font-size: 14px; }
+p  { margin: 0; }
+a  { color: inherit; text-decoration: none; }
+button, input, select, textarea { font: inherit; color: inherit; }
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+::selection { background: var(--brand-tint-2); }
+
+/* --------------------------------------------------------------------------
+   Primitives
+   -------------------------------------------------------------------------- */
+
+.muted   { color: var(--ink-3); }
+.dim     { color: var(--ink-4); }
+.strong  { color: var(--ink); font-weight: 500; }
+.nums    { font-variant-numeric: tabular-nums; }
+.tiny    { font-size: 12px; }
+.eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-4);
+}
+.stack   { display: flex; flex-direction: column; }
+.row     { display: flex; align-items: center; }
+.gap-2 { gap: 2px; }  .gap-4 { gap: 4px; }  .gap-5 { gap: 5px; }
+.gap-6 { gap: 6px; }  .gap-7 { gap: 7px; }  .gap-8 { gap: 8px; }
+.gap-9 { gap: 9px; }  .gap-10{ gap: 10px; } .gap-12{ gap: 12px; }
+.gap-14{ gap: 14px; } .gap-16{ gap: 16px; } .gap-18{ gap: 18px; }
+.gap-20{ gap: 20px; } .gap-24{ gap: 24px; }
+.between { justify-content: space-between; }
+.wrap    { flex-wrap: wrap; }
+.grow    { flex: 1 1 auto; min-width: 0; }
+.truncate{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hidden  { display: none !important; }
+
+/* Request identifiers are the spine of the product: every action is traceable
+   by one. They get a consistent, deliberately object-like treatment. */
+.rid {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--brand);
+  background: var(--brand-tint);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-sm);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.rid.plain { color: var(--ink-3); background: var(--surface-3); border-color: var(--border); }
+
+.mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* Buttons ------------------------------------------------------------------ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 34px; padding: 0 13px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+  font-size: 13.5px; font-weight: 500; letter-spacing: -0.005em;
+  cursor: pointer; white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-strong); }
+.btn:active:not(:disabled) { background: var(--surface-3); }
+.btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.btn svg { width: 15px; height: 15px; flex: none; }
+
+.btn.primary {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+  box-shadow: 0 1px 2px rgba(109,93,251,.28);
+}
+.btn.primary:hover:not(:disabled) { background: var(--brand-press); border-color: var(--brand-press); }
+.btn.primary:active:not(:disabled) { background: var(--brand-press); }
+
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; box-shadow: 0 1px 2px rgba(220,38,38,.24); }
+.btn.danger:hover:not(:disabled) { background: #B91C1C; border-color: #B91C1C; }
+
+.btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--ink-2); }
+.btn.ghost:hover:not(:disabled) { background: var(--surface-3); border-color: transparent; }
+
+.btn.sm { height: 28px; padding: 0 9px; font-size: 12.5px; border-radius: var(--r-sm); }
+.btn.sm svg { width: 13px; height: 13px; }
+.btn.lg { height: 40px; padding: 0 18px; font-size: 14px; }
+.btn.block { width: 100%; }
+.btn.icon { width: 30px; height: 30px; padding: 0; }
+.btn.icon.sm { width: 26px; height: 26px; }
+
+/* Cards -------------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+}
+.card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+.card-body { padding: 16px; }
+.card-body.tight { padding: 12px 16px; }
+.card-foot { padding: 11px 16px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+
+/* Status pills ------------------------------------------------------------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 9px 0 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px; font-weight: 500; letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.pill .dot { width: 6px; height: 6px; border-radius: 999px; flex: none; background: currentColor; }
+.pill.neutral { background: var(--surface-3); border-color: var(--border); color: var(--ink-3); }
+.pill.brand   { background: var(--brand-tint); border-color: var(--brand-line); color: var(--brand-press); }
+.pill.ok      { background: var(--ok-tint); border-color: var(--ok-line); color: #15803D; }
+.pill.warn    { background: var(--warn-tint); border-color: var(--warn-line); color: #B45309; }
+.pill.danger  { background: var(--danger-tint); border-color: var(--danger-line); color: #B91C1C; }
+
+/* A running job is the one place motion earns its keep. */
+.pill.running .dot { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* Encodes the thing the product cares about most: does this change an account?
+   Used on quick actions, table rows and the activity log, consistently. */
+.kind { width: 6px; height: 6px; border-radius: 999px; flex: none; }
+.kind.read    { background: var(--ink-4); }
+.kind.write   { background: var(--brand); }
+.kind.destroy { background: var(--danger); }
+
+/* Tables ------------------------------------------------------------------- */
+.table-wrap { overflow-x: auto; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.tbl th {
+  text-align: left; font-weight: 500; font-size: 11.5px; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-4);
+  padding: 9px 14px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2); white-space: nowrap;
+}
+table.tbl th:first-child { border-top-left-radius: var(--r-lg); }
+table.tbl th:last-child  { border-top-right-radius: var(--r-lg); }
+table.tbl td {
+  padding: 11px 14px; border-bottom: 1px solid var(--border);
+  vertical-align: middle; white-space: nowrap;
+}
+table.tbl tbody tr:last-child td { border-bottom: none; }
+table.tbl tbody tr.clickable { cursor: pointer; }
+table.tbl tbody tr.clickable:hover { background: var(--surface-2); }
+table.tbl td.wide { white-space: normal; min-width: 200px; }
+
+.avatar {
+  width: 26px; height: 26px; border-radius: 999px; flex: none;
+  display: grid; place-items: center;
+  background: var(--brand-tint); color: var(--brand-press);
+  font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+  border: 1px solid var(--brand-line);
+}
+.avatar.lg { width: 44px; height: 44px; font-size: 15px; }
+.avatar.grey { background: var(--surface-3); color: var(--ink-3); border-color: var(--border); }
+
+/* Forms -------------------------------------------------------------------- */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.label { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.hint  { font-size: 12px; color: var(--ink-3); }
+.input, .select, .textarea {
+  width: 100%; height: 36px; padding: 0 11px;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r);
+  font-size: 13.5px; color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.textarea { height: auto; padding: 10px 11px; resize: vertical; line-height: 1.55; }
+.input::placeholder, .textarea::placeholder { color: var(--ink-4); }
+.input:focus, .select:focus, .textarea:focus {
+  outline: none; border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(109,93,251,.14);
+}
+.select {
+  appearance: none; padding-right: 30px; cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+.search { position: relative; }
+.search .input { padding-left: 32px; }
+.search svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 15px; height: 15px; color: var(--ink-4); pointer-events: none;
+}
+
+.switch {
+  position: relative; width: 36px; height: 21px; flex: none;
+  background: var(--border-strong); border-radius: 999px; cursor: pointer;
+  border: none; padding: 0; transition: background .15s ease;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 17px; height: 17px; border-radius: 999px; background: #fff;
+  box-shadow: var(--shadow-sm); transition: transform .15s ease;
+}
+.switch[aria-checked="true"] { background: var(--brand); }
+.switch[aria-checked="true"]::after { transform: translateX(15px); }
+
+/* Meters ------------------------------------------------------------------- */
+.meter { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; display: flex; }
+.meter span { display: block; height: 100%; }
+.meter .used  { background: var(--brand); }
+.meter .idle  { background: var(--brand-line); }
+
+/* Layout ------------------------------------------------------------------- */
+.app { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: var(--sidebar-w); flex: none;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+}
+.brand-mark {
+  display: flex; align-items: center; gap: 9px;
+  padding: 16px 16px 14px;
+}
+.logo {
+  width: 28px; height: 28px; border-radius: 8px; flex: none;
+  background: var(--brand); display: grid; place-items: center;
+  box-shadow: 0 1px 2px rgba(109,93,251,.35);
+}
+.logo svg { width: 16px; height: 16px; color: #fff; }
+.brand-name { font-size: 14.5px; font-weight: 600; letter-spacing: -0.02em; }
+.brand-sub  { font-size: 11px; color: var(--ink-4); margin-top: -2px; }
+
+.nav { padding: 4px 10px; display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; overflow-y: auto; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 9px; border-radius: var(--r);
+  color: var(--ink-2); font-size: 13.5px; font-weight: 500;
+  cursor: pointer; border: none; background: none; width: 100%; text-align: left;
+  transition: background .1s ease, color .1s ease;
+}
+.nav-item svg { width: 16px; height: 16px; flex: none; color: var(--ink-4); }
+.nav-item:hover { background: var(--surface-3); }
+.nav-item.active { background: var(--brand-tint); color: var(--brand-press); }
+.nav-item.active svg { color: var(--brand); }
+.nav-count {
+  margin-left: auto; font-size: 11.5px; font-weight: 600;
+  color: var(--ink-3); background: var(--surface-3);
+  border-radius: 999px; padding: 1px 7px; min-width: 20px; text-align: center;
+}
+.nav-item.active .nav-count { background: #fff; color: var(--brand-press); }
+.nav-count.attention { background: var(--warn-tint); color: #B45309; }
+
+.side-foot { border-top: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.org-chip {
+  display: flex; align-items: center; gap: 9px; padding: 8px 9px;
+  border-radius: var(--r); cursor: pointer; border: none; background: none;
+  width: 100%; text-align: left;
+}
+.org-chip:hover { background: var(--surface-3); }
+/* Without this the inline SVG inherits no size and renders enormous. */
+.org-chip > svg { width: 15px; height: 15px; flex: none; color: var(--ink-4); }
+.org-logo {
+  width: 24px; height: 24px; border-radius: 6px; flex: none;
+  background: var(--ink); color: #fff; display: grid; place-items: center;
+  font-size: 11px; font-weight: 600;
+}
+
+.main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  height: var(--topbar-h); flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 24px;
+  background: rgba(255,255,255,.85);
+  backdrop-filter: saturate(1.5) blur(8px);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 30;
+}
+.crumb { font-size: 13.5px; color: var(--ink-3); }
+.crumb b { color: var(--ink); font-weight: 500; }
+
+.content { padding: 24px; max-width: 1360px; width: 100%; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.page-head .sub { color: var(--ink-3); font-size: 13.5px; margin-top: 3px; }
+
+.grid { display: grid; gap: 16px; }
+.g-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+.g-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.g-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+/* Cards size to their content rather than stretching to match the tallest
+   column, which otherwise leaves a dead white block under short lists. */
+.g-2-1 { grid-template-columns: minmax(0,2fr) minmax(0,1fr); align-items: start; }
+
+/* Settings puts its section list beside the panel. Declared here rather than
+   inline so the narrow-screen rule below can actually win. */
+.settings-grid { grid-template-columns: 210px minmax(0,1fr); gap: 20px; }
+
+/* Connection card — the one thing that must never be missable. The state rail
+   carries the status in form as well as colour. */
+.conn {
+  position: relative; overflow: hidden;
+  padding-left: 20px;
+}
+.conn::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--ok);
+}
+.conn.warn::before   { background: var(--warn); }
+.conn.danger::before { background: var(--danger); }
+
+.status-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ok); }
+.status-dot.warn { background: var(--warn); }
+.status-dot.danger { background: var(--danger); }
+.status-dot.ring { box-shadow: 0 0 0 3px var(--ok-tint); }
+.status-dot.warn.ring { box-shadow: 0 0 0 3px var(--warn-tint); }
+.status-dot.danger.ring { box-shadow: 0 0 0 3px var(--danger-tint); }
+
+/* Stat cards --------------------------------------------------------------- */
+.stat { padding: 15px 16px; }
+.stat .k { font-size: 12.5px; color: var(--ink-3); font-weight: 500; }
+.stat .v { font-size: 27px; font-weight: 600; letter-spacing: -0.03em; margin-top: 5px; line-height: 1.1; }
+.stat .m { font-size: 12px; color: var(--ink-4); margin-top: 4px; }
+
+/* Lists -------------------------------------------------------------------- */
+.list { display: flex; flex-direction: column; }
+.list-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.list-row:last-child { border-bottom: none; }
+.list-row.clickable { cursor: pointer; }
+.list-row.clickable:hover { background: var(--surface-2); }
+
+/* Alerts ------------------------------------------------------------------- */
+.alert {
+  display: flex; gap: 11px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2); font-size: 13px;
+}
+.alert svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.alert.warn   { background: var(--warn-tint); border-color: var(--warn-line); color: #92400E; }
+.alert.warn svg { color: var(--warn); }
+.alert.danger { background: var(--danger-tint); border-color: var(--danger-line); color: #991B1B; }
+.alert.danger svg { color: var(--danger); }
+.alert.ok     { background: var(--ok-tint); border-color: var(--ok-line); color: #14532D; }
+.alert.ok svg { color: var(--ok); }
+.alert.brand  { background: var(--brand-tint); border-color: var(--brand-line); color: #4C3FCC; }
+.alert.brand svg { color: var(--brand); }
+.alert b { font-weight: 600; }
+
+/* Overlays ----------------------------------------------------------------- */
+.scrim {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(24,24,27,.32);
+  backdrop-filter: blur(2px);
+  display: grid; place-items: start center;
+  padding: 8vh 20px 20px;
+  overflow-y: auto;
+  animation: fade .12s ease-out;
+}
+.scrim.center { place-items: center; padding: 20px; }
+@keyframes fade { from { opacity: 0; } }
+
+.modal {
+  width: 100%; max-width: 560px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-xl);
+  animation: rise .14s cubic-bezier(.2,.8,.3,1);
+}
+.modal.wide { max-width: 680px; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px) scale(.99); } }
+.modal-head { padding: 18px 20px 0; }
+.modal-body { padding: 18px 20px; }
+.modal-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 14px 20px; border-top: 1px solid var(--border);
+  background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+.modal-foot.split { justify-content: space-between; }
+
+.panel-scrim {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(24,24,27,.28);
+  animation: fade .12s ease-out;
+}
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 95;
+  width: min(560px, 100%);
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-xl);
+  display: flex; flex-direction: column;
+  animation: slide .16s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes slide { from { transform: translateX(16px); opacity: .6; } }
+.panel-head { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.panel-body { padding: 20px; overflow-y: auto; flex: 1 1 auto; }
+.panel-foot { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface-2); }
+
+/* Definition rows ---------------------------------------------------------- */
+/* Wide enough that "Last successful sign-in" stays on one line. */
+.defs { display: grid; grid-template-columns: 168px minmax(0,1fr); gap: 9px 16px; font-size: 13.5px; }
+.defs dt { color: var(--ink-3); }
+.defs dd { margin: 0; color: var(--ink); }
+
+/* Timeline ----------------------------------------------------------------- */
+.timeline { position: relative; padding-left: 22px; display: flex; flex-direction: column; gap: 15px; }
+.timeline::before {
+  content: ""; position: absolute; left: 5px; top: 5px; bottom: 5px;
+  width: 1.5px; background: var(--border);
+}
+.tl-item { position: relative; font-size: 13px; }
+.tl-item::before {
+  content: ""; position: absolute; left: -22px; top: 4px;
+  width: 11px; height: 11px; border-radius: 999px;
+  background: var(--surface); border: 2px solid var(--border-strong);
+}
+.tl-item.ok::before     { border-color: var(--ok); background: var(--ok); box-shadow: 0 0 0 2px var(--ok-tint); }
+.tl-item.brand::before  { border-color: var(--brand); background: var(--brand); box-shadow: 0 0 0 2px var(--brand-tint); }
+.tl-item.danger::before { border-color: var(--danger); background: var(--danger); box-shadow: 0 0 0 2px var(--danger-tint); }
+.tl-item .t { font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
+
+/* Evidence ----------------------------------------------------------------- */
+.shot {
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-3); overflow: hidden;
+}
+.shot .frame {
+  height: 148px; display: grid; place-items: center; gap: 6px;
+  color: var(--ink-4); font-size: 12px;
+  background:
+    linear-gradient(var(--surface-2) 0 0) padding-box,
+    repeating-linear-gradient(45deg, var(--surface-3) 0 8px, var(--surface-2) 8px 16px);
+}
+.shot .cap { padding: 8px 11px; border-top: 1px solid var(--border); background: var(--surface); font-size: 12px; }
+
+/* Quick actions ------------------------------------------------------------ */
+.qa {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; text-align: left;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-md); cursor: pointer; width: 100%;
+  box-shadow: var(--shadow-sm);
+  transition: border-color .12s ease, background .12s ease;
+}
+.qa:hover { border-color: var(--brand-line); background: var(--brand-tint); }
+.qa .qi {
+  width: 30px; height: 30px; border-radius: var(--r); flex: none;
+  display: grid; place-items: center;
+  background: var(--surface-3); color: var(--ink-2);
+}
+.qa:hover .qi { background: #fff; color: var(--brand-press); }
+.qa .qi svg { width: 15px; height: 15px; }
+.qa .qt { font-size: 13.5px; font-weight: 500; }
+.qa .qs { font-size: 11.5px; color: var(--ink-3); }
+
+/* Skeletons ---------------------------------------------------------------- */
+.sk {
+  background: linear-gradient(90deg, var(--surface-3) 25%, #EDEDEF 37%, var(--surface-3) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+  border-radius: var(--r-sm);
+  height: 12px;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+/* Empty state -------------------------------------------------------------- */
+.empty { display: grid; place-items: center; gap: 5px; padding: 52px 24px; text-align: center; }
+.empty .ei {
+  width: 40px; height: 40px; border-radius: var(--r-md);
+  display: grid; place-items: center; margin-bottom: 7px;
+  background: var(--surface-3); color: var(--ink-4);
+}
+.empty .ei svg { width: 19px; height: 19px; }
+.empty h3 { font-size: 14.5px; }
+.empty p { font-size: 13px; color: var(--ink-3); max-width: 330px; }
+
+/* Discord preview ---------------------------------------------------------- */
+.dc {
+  background: #313338; border-radius: var(--r-md); padding: 14px 16px;
+  color: #DBDEE1; font-size: 13.5px; line-height: 1.5;
+}
+.dc-msg { display: flex; gap: 11px; }
+.dc-av {
+  width: 34px; height: 34px; border-radius: 999px; flex: none;
+  background: var(--brand); display: grid; place-items: center;
+}
+.dc-av svg { width: 17px; height: 17px; color: #fff; }
+.dc-name { color: #fff; font-weight: 600; font-size: 13.5px; }
+.dc-tag {
+  background: var(--brand); color: #fff; font-size: 10px; font-weight: 600;
+  border-radius: 4px; padding: 1px 4px; margin-left: 5px; letter-spacing: .01em;
+}
+.dc-time { color: #949BA4; font-size: 11.5px; margin-left: 6px; }
+.dc-embed {
+  border-left: 4px solid var(--ok); background: #2B2D31;
+  border-radius: 4px; padding: 12px 14px; margin-top: 7px; max-width: 460px;
+}
+.dc-embed.brand  { border-left-color: var(--brand); }
+.dc-embed.warn   { border-left-color: var(--warn); }
+.dc-embed.danger { border-left-color: var(--danger); }
+.dc-embed h4 { color: #fff; font-size: 14px; margin-bottom: 6px; }
+.dc-fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px 14px; margin-top: 10px; }
+.dc-f .k { color: #B5BAC1; font-size: 11.5px; font-weight: 600; }
+.dc-f .v { color: #DBDEE1; font-size: 13px; }
+.dc-foot { color: #949BA4; font-size: 11.5px; margin-top: 11px; }
+.dc-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.dc-btn {
+  border-radius: 4px; padding: 6px 14px; font-size: 13px; font-weight: 500;
+  background: #4E5058; color: #fff; border: none;
+}
+.dc-btn.primary { background: var(--brand); }
+.dc-btn.danger  { background: #DA373C; }
+.dc-btn.ok      { background: #248046; }
+
+/* Sign in ------------------------------------------------------------------ */
+.signin { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--bg); }
+.signin-card { width: 100%; max-width: 400px; }
+
+/* Segmented control -------------------------------------------------------- */
+.seg { display: inline-flex; background: var(--surface-3); border-radius: var(--r); padding: 2px; gap: 2px; }
+.seg button {
+  border: none; background: none; cursor: pointer;
+  height: 26px; padding: 0 11px; border-radius: var(--r-sm);
+  font-size: 12.5px; font-weight: 500; color: var(--ink-3);
+}
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+
+/* Menu --------------------------------------------------------------------- */
+.menu {
+  position: fixed; z-index: 120; min-width: 190px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-md); box-shadow: var(--shadow-lg); padding: 4px;
+  animation: rise .1s ease-out;
+}
+.menu button {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  border: none; background: none; cursor: pointer; text-align: left;
+  padding: 7px 9px; border-radius: var(--r-sm); font-size: 13px; color: var(--ink-2);
+}
+.menu button:hover { background: var(--surface-3); }
+.menu button.danger { color: var(--danger); }
+.menu button.danger:hover { background: var(--danger-tint); }
+.menu button svg { width: 14px; height: 14px; color: var(--ink-4); }
+.menu button.danger svg { color: var(--danger); }
+.menu hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+/* Toast -------------------------------------------------------------------- */
+.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--ink); color: #fff; border-radius: var(--r-md);
+  padding: 11px 14px; font-size: 13px; box-shadow: var(--shadow-xl);
+  animation: rise .14s ease-out;
+}
+.toast svg { width: 15px; height: 15px; flex: none; }
+.toast .ok { color: #4ADE80; }
+
+/* Mobile ------------------------------------------------------------------- */
+.mobile-only { display: none; }
+.drawer-scrim { position: fixed; inset: 0; background: rgba(24,24,27,.4); z-index: 110; animation: fade .12s ease-out; }
+
+@media (max-width: 1100px) {
+  .g-4 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .g-2-1, .g-3 { grid-template-columns: minmax(0,1fr); }
+}
+
+@media (max-width: 860px) {
+  .mobile-only { display: inline-flex; }
+  .desktop-only { display: none !important; }
+
+  .sidebar {
+    position: fixed; z-index: 115; left: 0; top: 0; bottom: 0;
+    transform: translateX(-100%);
+    transition: transform .18s cubic-bezier(.2,.8,.3,1);
+    box-shadow: var(--shadow-xl);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .content { padding: 16px; }
+  .topbar { padding: 0 14px; }
+  .settings-grid { grid-template-columns: minmax(0,1fr); }
+  /* The section list becomes a horizontal strip rather than a tall stack. */
+  .settings-grid .nav { flex-direction: row; overflow-x: auto; gap: 4px; }
+  .settings-grid .nav-item { width: auto; white-space: nowrap; }
+  .page-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .g-2, .g-4 { grid-template-columns: minmax(0,1fr); }
+  .panel { width: 100%; }
+  .defs { grid-template-columns: minmax(0,1fr); gap: 2px 0; }
+  .defs dt { margin-top: 9px; font-size: 12px; }
+  .dc-fields { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  /* Full width and clear of the sidebar footer, which sits bottom-left. */
+  .toasts { left: 12px; right: 12px; bottom: 12px; }
+  .scrim { padding: 0; place-items: stretch; }
+  .modal { max-width: none; border-radius: 0; min-height: 100%; border: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+</style>
+
+<div id="root"></div>
+<div id="overlays"></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ==========================================================================
+   ReadySupport — interactive design prototype
+
+   Everything here is example data. No real account, credential or Readymode
+   instance is involved.
+   ========================================================================== */
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const h = (strings, ...vals) => strings.reduce((out, s, i) => out + s + (vals[i] ?? ''), '');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+/* --- Icons: 16px stroked, one visual family ------------------------------ */
+const I = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}${extra}</svg>`;
+const icons = {
+  shield:   I('<path d="M12 3 5 6v5.5c0 4.2 2.9 8 7 9 4.1-1 7-4.8 7-9V6l-7-3Z"/><path d="m9.2 12 2 2 3.6-3.8"/>'),
+  home:     I('<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1v-8.5Z"/>'),
+  inbox:    I('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 13H8l1.5 2.5h5L16 13h4.5"/>'),
+  users:    I('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.9-4.6 5.5-4.6S14 16 14.6 19"/><path d="M16 5.4a3.2 3.2 0 0 1 0 5.2M17.5 14.7c1.8.6 3 2.1 3.4 4.3"/>'),
+  key:      I('<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21m-3 0v3m-2.5-3v2"/>'),
+  activity: I('<path d="M3.5 12h3.2l2.3-6 4 13 2.4-7h5.1"/>'),
+  plug:     I('<path d="M9 3v5m6-5v5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0V8Z"/><path d="M12 17v4"/>'),
+  team:     I('<circle cx="12" cy="7.5" r="3.3"/><path d="M5.5 20c.5-3.4 3.2-5.4 6.5-5.4s6 2 6.5 5.4"/>'),
+  gear:     I('<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M20.5 12h-2M5.5 12h-2M18 6l-1.4 1.4M7.4 16.6 6 18M18 18l-1.4-1.4M7.4 7.4 6 6"/>'),
+  plus:     I('<path d="M12 5v14M5 12h14"/>'),
+  search:   I('<circle cx="11" cy="11" r="6"/><path d="m20 20-3.6-3.6"/>'),
+  check:    I('<path d="m5 12.5 4.5 4.5L19 7"/>'),
+  x:        I('<path d="M6 6l12 12M18 6 6 18"/>'),
+  alert:    I('<path d="M12 4.5 2.8 20h18.4L12 4.5Z"/><path d="M12 10v4m0 3h.01"/>'),
+  info:     I('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5m0-8h.01"/>'),
+  clock:    I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  refresh:  I('<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/>'),
+  external: I('<path d="M14 5h5v5"/><path d="m19 5-8 8"/><path d="M18.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7A1.5 1.5 0 0 1 6 5.5h4"/>'),
+  dots:     I('<circle cx="12" cy="5.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.4" fill="currentColor" stroke="none"/>'),
+  menu:     I('<path d="M4 7h16M4 12h16M4 17h16"/>'),
+  chevron:  I('<path d="m9 6 6 6-6 6"/>'),
+  down:     I('<path d="m6 9 6 6 6-6"/>'),
+  logout:   I('<path d="M15 5.5H6.5A1.5 1.5 0 0 0 5 7v10a1.5 1.5 0 0 0 1.5 1.5H15"/><path d="M18.5 12H10m8.5 0-3-3m3 3-3 3"/>'),
+  help:     I('<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.7-.9 1.3v.3m0 3h.01"/>'),
+  user:     I('<circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.5c.6-3.2 3.2-5 6.5-5s5.9 1.8 6.5 5"/>'),
+  lock:     I('<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
+  trash:    I('<path d="M4.5 7h15M9.5 7V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5V7"/><path d="M6.5 7 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/>'),
+  discord:  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.3 5.4A17 17 0 0 0 15 4l-.3.6a15 15 0 0 1 3.8 1.3 13.5 13.5 0 0 0-11.4 0A15 15 0 0 1 11 4.6L10.7 4A17 17 0 0 0 6.4 5.4C3.6 9.5 2.9 13.5 3.2 17.5a17 17 0 0 0 5.2 2.6l1-1.7c-.6-.2-1.2-.5-1.7-.8l.4-.3a12 12 0 0 0 10.2 0l.4.3c-.5.3-1.1.6-1.7.8l1 1.7a17 17 0 0 0 5.2-2.6c.4-4.6-.6-8.6-2.9-12.1ZM9.5 15c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.9.9 1.8 2c0 1.1-.8 2-1.8 2Zm5.2 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.9.9 1.8 2c0 1.1-.8 2-1.8 2Z"/></svg>',
+  db:       I('<ellipse cx="12" cy="6.5" rx="7" ry="2.8"/><path d="M5 6.5v11c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-11"/><path d="M5 12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8"/>'),
+  browser:  I('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9h17"/><circle cx="6.5" cy="6.75" r=".7" fill="currentColor" stroke="none"/>'),
+  spark:    I('<path d="M12 4.5 13.6 9l4.4 1.6-4.4 1.6L12 16.6 10.4 12.2 6 10.6 10.4 9 12 4.5Z"/><path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z"/>'),
+  image:    I('<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="m4.5 17 4.2-4.2a1.5 1.5 0 0 1 2.1 0L15 16.5m1.5-1.5a1.5 1.5 0 0 1 2.1 0l1.9 1.9"/>'),
+  file:     I('<path d="M13.5 4.5H7A1.5 1.5 0 0 0 5.5 6v12A1.5 1.5 0 0 0 7 19.5h10a1.5 1.5 0 0 0 1.5-1.5V9.5l-5-5Z"/><path d="M13.5 4.5v5h5"/>'),
+  bell:     I('<path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10Z"/><path d="M10.2 19a2 2 0 0 0 3.6 0"/>'),
+  building: I('<path d="M4.5 20V6.5L12 4l7.5 2.5V20"/><path d="M4.5 20h15M9 20v-4h6v4"/><path d="M8.5 9h1.5m4 0h1.5m-7 3.5h1.5m4 0h1.5"/>'),
+};
+
+/* --- Example data -------------------------------------------------------- */
+const ME = { name: 'Kaeden Vaughns', initials: 'KV', role: 'Owner', email: 'kaeden@northlineops.com', discord: 'kaeden' };
+const ORG = { name: 'Northline Operations', initials: 'NO', plan: 'Team' };
+
+const AGENTS = [
+  { id: '1001', name: 'John Brown',    user: 'jbrown',  email: 'john.brown@northlineops.com',    role: 'Agent',      team: 'Team A', campaign: 'Vantage', queue: 'Inbound',     license: 'Standard', licenseInUse: true,  status: 'active',   presence: 'Available', onCall: false, connected: '3h 12m', last: '2 minutes ago' },
+  { id: '1002', name: 'Sarah Garcia',  user: 'sgarcia', email: 'sarah.garcia@northlineops.com',  role: 'Agent',      team: 'Team A', campaign: 'Vantage', queue: 'Outbound',    license: 'Standard', licenseInUse: true,  status: 'active',   presence: 'On a call', onCall: true,  connected: '5h 41m', last: 'Just now' },
+  { id: '1003', name: 'Marcus Smith',  user: 'msmith',  email: 'marcus.smith@northlineops.com',  role: 'Agent',      team: 'Team B', campaign: 'Horizon', queue: 'Inbound',     license: 'Premium',  licenseInUse: false, status: 'active',   presence: 'Offline',   onCall: false, connected: '—',      last: '2 days ago' },
+  { id: '1004', name: 'Marcus Smith',  user: 'msmith2', email: 'marcus.smith2@northlineops.com', role: 'Supervisor', team: 'Team C', campaign: 'Horizon', queue: 'Escalations', license: 'Premium',  licenseInUse: true,  status: 'active',   presence: 'Idle',      onCall: false, connected: '7h 03m', last: '46 minutes ago' },
+  { id: '1005', name: 'Dana Lee',      user: 'dlee',    email: 'dana.lee@northlineops.com',      role: 'Agent',      team: 'Team B', campaign: 'Vantage', queue: 'Inbound',     license: 'Standard', licenseInUse: false, status: 'inactive', presence: 'Offline',   onCall: false, connected: '—',      last: '11 days ago' },
+  { id: '1006', name: 'Priya Raman',   user: 'praman',  email: 'priya.raman@northlineops.com',   role: 'Agent',      team: 'Team A', campaign: 'Vantage', queue: 'Inbound',     license: 'Standard', licenseInUse: true,  status: 'active',   presence: 'Available', onCall: false, connected: '1h 55m', last: '8 minutes ago' },
+  { id: '1007', name: 'Tobias Klein',  user: 'tklein',  email: 'tobias.klein@northlineops.com',  role: 'Manager',    team: 'Team C', campaign: 'Horizon', queue: 'Escalations', license: 'Premium',  licenseInUse: true,  status: 'active',   presence: 'Idle',      onCall: false, connected: '6h 20m', last: '1 hour ago' },
+  { id: '1008', name: 'Ava Nwosu',     user: 'anwosu',  email: 'ava.nwosu@northlineops.com',     role: 'Agent',      team: 'Team B', campaign: 'Horizon', queue: 'Outbound',    license: 'Standard', licenseInUse: false, status: 'active',   presence: 'Offline',   onCall: false, connected: '—',      last: '4 hours ago' },
+];
+
+const REQUESTS = [
+  { id: 1048, action: 'Create account',      kind: 'write',   target: 'Marcus Smith (msmith3)', by: 'Kaeden Vaughns', status: 'completed',  created: 'Today 3:41 PM', done: 'Today 3:42 PM', via: 'Discord' },
+  { id: 1047, action: 'Clear license',       kind: 'write',   target: 'John Brown',             by: 'Rosa Delgado',   status: 'running',    created: 'Today 3:38 PM', done: '—',             via: 'Dashboard' },
+  { id: 1046, action: 'Deactivate account',  kind: 'destroy', target: 'Dana Lee',               by: 'Rosa Delgado',   status: 'approval',   created: 'Today 3:31 PM', done: '—',             via: 'Dashboard' },
+  { id: 1045, action: 'Reset password',      kind: 'write',   target: 'Sarah Garcia',           by: 'Kaeden Vaughns', status: 'completed',  created: 'Today 2:58 PM', done: 'Today 2:59 PM', via: 'Discord' },
+  { id: 1044, action: 'Clear license',       kind: 'write',   target: 'Marcus Smith',           by: 'Ben Osei',       status: 'failed',     created: 'Today 2:44 PM', done: 'Today 2:44 PM', via: 'Discord' },
+  { id: 1043, action: 'Check license usage', kind: 'read',    target: 'All licenses',           by: 'Ben Osei',       status: 'completed',  created: 'Today 2:20 PM', done: 'Today 2:20 PM', via: 'Discord' },
+  { id: 1042, action: 'Create account',      kind: 'write',   target: 'Priya Raman (praman)',   by: 'Kaeden Vaughns', status: 'info',       created: 'Today 1:52 PM', done: '—',             via: 'Discord' },
+  { id: 1041, action: 'Check agent status',  kind: 'read',    target: 'Sarah Garcia',           by: 'Nadia Farouk',   status: 'completed',  created: 'Today 1:34 PM', done: 'Today 1:34 PM', via: 'Dashboard' },
+  { id: 1040, action: 'Reset password',      kind: 'write',   target: 'Tobias Klein',           by: 'Rosa Delgado',   status: 'cancelled',  created: 'Today 12:10 PM', done: 'Today 12:14 PM', via: 'Dashboard' },
+  { id: 1039, action: 'Deactivate account',  kind: 'destroy', target: 'Owen Pryce',             by: 'Kaeden Vaughns', status: 'completed',  created: 'Yesterday 5:02 PM', done: 'Yesterday 5:06 PM', via: 'Dashboard' },
+  { id: 1038, action: 'Clear license',       kind: 'write',   target: 'Ava Nwosu',              by: 'Ben Osei',       status: 'completed',  created: 'Yesterday 4:20 PM', done: 'Yesterday 4:21 PM', via: 'Discord' },
+  { id: 1037, action: 'Create account',      kind: 'write',   target: 'Tobias Klein (tklein)',  by: 'Nadia Farouk',   status: 'completed',  created: 'Yesterday 11:40 AM', done: 'Yesterday 11:41 AM', via: 'Dashboard' },
+];
+
+const STATUS = {
+  pending:   { label: 'Pending',            cls: 'neutral' },
+  info:      { label: 'Needs information',  cls: 'warn' },
+  approval:  { label: 'Awaiting approval',  cls: 'warn' },
+  approved:  { label: 'Approved',           cls: 'brand' },
+  running:   { label: 'Running',            cls: 'brand running' },
+  completed: { label: 'Completed',          cls: 'ok' },
+  failed:    { label: 'Failed',             cls: 'danger' },
+  cancelled: { label: 'Cancelled',          cls: 'neutral' },
+  login:     { label: 'Login required',     cls: 'danger' },
+};
+
+const TEAM = [
+  { name: 'Kaeden Vaughns', email: 'kaeden@northlineops.com', discord: 'kaeden',   role: 'Owner',   status: 'active',  last: 'Now' },
+  { name: 'Rosa Delgado',   email: 'rosa@northlineops.com',   discord: 'rosa.d',   role: 'Admin',   status: 'active',  last: '12 minutes ago' },
+  { name: 'Ben Osei',       email: 'ben@northlineops.com',    discord: 'benosei',  role: 'Support', status: 'active',  last: '1 hour ago' },
+  { name: 'Nadia Farouk',   email: 'nadia@northlineops.com',  discord: 'nadiaf',   role: 'Support', status: 'active',  last: 'Yesterday' },
+  { name: 'Owen Pryce',     email: 'owen@northlineops.com',   discord: 'opryce',   role: 'Viewer',  status: 'invited', last: 'Never' },
+];
+
+const ROLE_POWERS = {
+  Owner:   'Everything an admin can do, plus managing who has access and changing approval rules.',
+  Admin:   'Create accounts, clear licenses, reset passwords, deactivate accounts, and see the full activity log.',
+  Support: 'Create accounts, clear licenses, reset passwords, and look up any agent. Cannot deactivate accounts.',
+  Viewer:  'Look up license usage and agent status, and see their own requests. Cannot change anything.',
+};
+
+const ACTIVITY = [
+  { time: 'Today 3:42:11 PM', user: 'Kaeden Vaughns', action: 'Account created',     kind: 'write',   target: 'msmith3',      result: 'ok',    rid: 1048, ev: true },
+  { time: 'Today 3:42:04 PM', user: 'ReadySupport',   action: 'Change verified',     kind: 'read',    target: 'msmith3',      result: 'ok',    rid: 1048, ev: true },
+  { time: 'Today 3:41:52 PM', user: 'Rosa Delgado',   action: 'Approved request',    kind: 'read',    target: 'Create account', result: 'ok',  rid: 1048, ev: false },
+  { time: 'Today 3:41:20 PM', user: 'Kaeden Vaughns', action: 'Request submitted',   kind: 'read',    target: 'Create account', result: 'ok',  rid: 1048, ev: false },
+  { time: 'Today 3:38:40 PM', user: 'Rosa Delgado',   action: 'License clear started', kind: 'write', target: 'jbrown',       result: 'run',   rid: 1047, ev: false },
+  { time: 'Today 3:31:02 PM', user: 'Rosa Delgado',   action: 'Approval requested',  kind: 'destroy', target: 'dlee',         result: 'wait',  rid: 1046, ev: false },
+  { time: 'Today 2:59:18 PM', user: 'ReadySupport',   action: 'Password delivered',  kind: 'write',   target: 'sgarcia',      result: 'ok',    rid: 1045, ev: false },
+  { time: 'Today 2:59:02 PM', user: 'Kaeden Vaughns', action: 'Password reset',      kind: 'write',   target: 'sgarcia',      result: 'ok',    rid: 1045, ev: true },
+  { time: 'Today 2:44:31 PM', user: 'Ben Osei',       action: 'License clear failed', kind: 'write',  target: 'Marcus Smith', result: 'fail',  rid: 1044, ev: true },
+  { time: 'Today 2:20:07 PM', user: 'Ben Osei',       action: 'License usage checked', kind: 'read',  target: 'All licenses', result: 'ok',    rid: 1043, ev: true },
+  { time: 'Today 1:52:44 PM', user: 'ReadySupport',   action: 'More information requested', kind: 'read', target: 'praman',   result: 'wait',  rid: 1042, ev: false },
+  { time: 'Today 11:04:12 AM', user: 'Unknown user',  action: 'Request refused',     kind: 'read',    target: '/clear_license', result: 'fail', rid: null, ev: false },
+];
+
+const CONNECTIONS = [
+  { key: 'discord',     name: 'Discord',     state: 'ok',   icon: 'discord', detail: 'ReadySupport#4417 in Northline Ops', sub: '3 channels approved' },
+  { key: 'browserbase', name: 'Browserbase', state: 'ok',   icon: 'browser', detail: 'Persistent context ctx_8f2…c41',     sub: 'Last session 4 minutes ago' },
+  { key: 'supabase',    name: 'Supabase',    state: 'ok',   icon: 'db',      detail: 'northline-readysupport',             sub: 'Responding in 38 ms' },
+  { key: 'openai',      name: 'OpenAI',      state: 'warn', icon: 'spark',   detail: 'gpt-4o-mini',                        sub: 'Slower than usual — 2.4 s average' },
+];
+
+/* --- App state ----------------------------------------------------------- */
+const state = {
+  signedIn: false,
+  page: 'overview',
+  demo: 'normal',        // normal | loading | empty | error | disconnected
+  drawer: false,
+  agentId: null,
+  requestId: null,
+  filters: { status: 'all', action: 'all', by: 'all', q: '' },
+  agentQuery: '',
+  busy: null,
+};
+
+const CONNECTED = () => state.demo !== 'disconnected';
+
+/* --- Small components ---------------------------------------------------- */
+
+const pill = (key) => {
+  const s = STATUS[key] || STATUS.pending;
+  return `<span class="pill ${s.cls}"><span class="dot"></span>${s.label}</span>`;
+};
+
+const rid = (id, plain = false) => id
+  ? `<span class="rid ${plain ? 'plain' : ''}">RS-${id}</span>`
+  : `<span class="rid plain">—</span>`;
+
+/* Read-only, changes an account, or removes access. Same three dots
+   everywhere, so the distinction is learnable in one sitting. */
+const kindDot = (kind) => {
+  const title = kind === 'read' ? 'Read only'
+    : kind === 'destroy' ? 'Removes access'
+    : 'Changes an account';
+  return `<span class="kind ${kind}" title="${title}"></span>`;
+};
+
+const initials = (name) => name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+const person = (name, sub) => h`
+  <div class="row gap-10">
+    <div class="avatar">${esc(initials(name))}</div>
+    <div class="stack">
+      <span class="strong">${esc(name)}</span>
+      ${sub ? `<span class="tiny muted">${esc(sub)}</span>` : ''}
+    </div>
+  </div>`;
+
+const licensePill = (agent) => agent.licenseInUse
+  ? `<span class="pill brand"><span class="dot"></span>${esc(agent.license)}</span>`
+  : `<span class="pill neutral"><span class="dot"></span>Not in use</span>`;
+
+const accountPill = (agent) => agent.status === 'active'
+  ? `<span class="pill ok"><span class="dot"></span>Active</span>`
+  : `<span class="pill neutral"><span class="dot"></span>Deactivated</span>`;
+
+const emptyState = (icon, title, body, action = '') => h`
+  <div class="empty">
+    <div class="ei">${icons[icon]}</div>
+    <h3>${esc(title)}</h3>
+    <p>${esc(body)}</p>
+    ${action ? `<div style="margin-top:12px">${action}</div>` : ''}
+  </div>`;
+
+const skeletonRows = (n = 6, cols = 5) => Array.from({ length: n }, () => h`
+  <tr>${Array.from({ length: cols }, (_, i) => h`
+    <td><div class="sk" style="width:${[70, 55, 85, 40, 60][i % 5]}%"></div></td>`).join('')}
+  </tr>`).join('');
+
+const errorState = (what) => h`
+  <div class="empty">
+    <div class="ei" style="background:var(--danger-tint);color:var(--danger)">${icons.alert}</div>
+    <h3>${esc(what)} could not be loaded</h3>
+    <p>The connection to ReadySupport dropped. Nothing was changed. This usually clears on its own within a minute.</p>
+    <div class="row gap-8" style="margin-top:12px">
+      <button class="btn primary" data-act="retry-load">${icons.refresh}Try again</button>
+      <button class="btn" data-act="goto" data-page="connections">Check connections</button>
+    </div>
+  </div>`;
+
+/* --- Sidebar ------------------------------------------------------------- */
+const NAV = [
+  { key: 'overview',    label: 'Overview',    icon: 'home' },
+  { key: 'requests',    label: 'Requests',    icon: 'inbox',    count: 2, attention: true },
+  { key: 'agents',      label: 'Agents',      icon: 'users' },
+  { key: 'licenses',    label: 'Licenses',    icon: 'key' },
+  { key: 'activity',    label: 'Activity',    icon: 'activity' },
+  { key: 'connections', label: 'Connections', icon: 'plug' },
+  { key: 'team',        label: 'Team',        icon: 'team' },
+  { key: 'settings',    label: 'Settings',    icon: 'gear' },
+];
+
+const sidebar = () => h`
+  <aside class="sidebar ${state.drawer ? 'open' : ''}" id="sidebar">
+    <div class="brand-mark">
+      <div class="logo">${icons.shield}</div>
+      <div class="stack">
+        <span class="brand-name">ReadySupport</span>
+        <span class="brand-sub">Readymode operations</span>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      ${NAV.map((n) => h`
+        <button class="nav-item ${state.page === n.key ? 'active' : ''}"
+                data-act="goto" data-page="${n.key}"
+                ${state.page === n.key ? 'aria-current="page"' : ''}>
+          ${icons[n.icon]}
+          <span>${n.label}</span>
+          ${n.count && CONNECTED() && state.demo !== 'empty'
+            ? `<span class="nav-count ${n.attention ? 'attention' : ''}">${n.count}</span>` : ''}
+        </button>`).join('')}
+    </nav>
+
+    <div class="side-foot">
+      <button class="org-chip" data-act="noop">
+        <span class="org-logo">${ORG.initials}</span>
+        <span class="stack grow">
+          <span class="strong truncate" style="font-size:13px">${ORG.name}</span>
+          <span class="tiny dim">${ORG.plan} plan</span>
+        </span>
+        ${icons.down}
+      </button>
+
+      <button class="org-chip" data-act="noop">
+        <span class="avatar" style="width:24px;height:24px;font-size:10px">${ME.initials}</span>
+        <span class="stack grow">
+          <span class="strong truncate" style="font-size:13px">${ME.name}</span>
+          <span class="tiny dim">${ME.role}</span>
+        </span>
+      </button>
+
+      <div class="row gap-4" style="padding:2px 4px 0">
+        <button class="btn ghost sm grow" style="justify-content:flex-start" data-act="noop">${icons.help}Help</button>
+        <button class="btn ghost sm grow" style="justify-content:flex-start" data-act="signout">${icons.logout}Sign out</button>
+      </div>
+    </div>
+  </aside>`;
+
+/* --- Top bar ------------------------------------------------------------- */
+const topbar = () => {
+  const title = NAV.find((n) => n.key === state.page)?.label ?? '';
+  return h`
+    <header class="topbar">
+      <button class="btn icon ghost mobile-only" data-act="drawer" aria-label="Open menu">${icons.menu}</button>
+      <div class="crumb grow truncate">${ORG.name} <span class="dim">/</span> <b>${title}</b></div>
+
+      ${!CONNECTED() ? h`
+        <button class="btn sm desktop-only" data-act="goto" data-page="connections"
+                style="background:var(--danger-tint);border-color:var(--danger-line);color:#B91C1C">
+          <span class="status-dot danger"></span>Readymode disconnected
+        </button>` : ''}
+
+      <!-- Prototype control: shows the loading, empty, error and disconnected
+           states in place rather than as separate mockups. -->
+      <label class="row gap-6 desktop-only" style="font-size:12px;color:var(--ink-4)">
+        State
+        <select class="select" id="demoState" style="height:28px;width:150px;font-size:12.5px">
+          <option value="normal">Normal</option>
+          <option value="loading">Loading</option>
+          <option value="empty">Empty</option>
+          <option value="error">Error</option>
+          <option value="disconnected">Readymode down</option>
+        </select>
+      </label>
+
+      <button class="btn primary" data-act="new-request">${icons.plus}<span class="desktop-only">New request</span></button>
+    </header>`;
+};
+
+/* --- Overview ------------------------------------------------------------ */
+const connectionCard = () => {
+  const down = !CONNECTED();
+  const cls = down ? 'danger' : 'ok';
+
+  return h`
+    <div class="card conn ${down ? 'danger' : ''}">
+      <div class="card-body">
+        <div class="row between wrap gap-16">
+          <div class="stack gap-8">
+            <div class="row gap-8">
+              <span class="status-dot ${cls} ring"></span>
+              <h2>${down ? 'ReadySupport cannot reach Readymode' : 'Connected to Readymode'}</h2>
+            </div>
+            <p class="muted" style="max-width:52ch">
+              ${down
+                ? 'No queued changes will run until someone signs back in. Nothing has been lost — 2 requests are waiting and will run automatically once the connection is restored.'
+                : 'Signed in as the admin account. Queued work is running normally.'}
+            </p>
+          </div>
+
+          <div class="row gap-8">
+            ${down
+              ? `<button class="btn primary" data-act="reconnect">${icons.refresh}Reconnect Readymode</button>`
+              : `<button class="btn" data-act="test-connection">${icons.refresh}Test connection</button>`}
+            <button class="btn" data-act="goto" data-page="connections">Details${icons.chevron}</button>
+          </div>
+        </div>
+
+        <div class="grid g-3" style="margin-top:16px;gap:12px">
+          <div class="stack gap-4">
+            <span class="eyebrow">Last verified</span>
+            <span class="strong nums">${down ? '18 minutes ago' : '40 seconds ago'}</span>
+          </div>
+          <div class="stack gap-4">
+            <span class="eyebrow">Browser session</span>
+            <span class="row gap-6">
+              <span class="status-dot ${down ? 'danger' : 'ok'}"></span>
+              <span class="strong">${down ? 'Ended' : 'Ready'}</span>
+              <span class="tiny dim mono">bb_7a41…e92</span>
+            </span>
+          </div>
+          <div class="stack gap-4">
+            <span class="eyebrow">Queue</span>
+            <span class="strong">${down ? '2 requests waiting' : '1 running · 0 waiting'}</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+};
+
+const statCard = (k, v, m, tone = '') => h`
+  <div class="card stat">
+    <div class="k">${esc(k)}</div>
+    <div class="v ${tone}" style="${tone === 'brand' ? 'color:var(--brand)' : ''}">${v}</div>
+    <div class="m">${m}</div>
+  </div>`;
+
+const pageOverview = () => {
+  if (state.demo === 'loading') return overviewLoading();
+
+  const holders = AGENTS.filter((a) => a.licenseInUse);
+  const recent = REQUESTS.slice(0, 5);
+  const empty = state.demo === 'empty';
+
+  return h`
+    <div class="page-head">
+      <div>
+        <h1>Good morning, Kaeden</h1>
+        <p class="sub">Here is what ReadySupport is handling today.</p>
+      </div>
+      <button class="btn primary lg desktop-only" data-act="new-request">${icons.plus}New request</button>
+    </div>
+
+    <div class="stack gap-16">
+      ${connectionCard()}
+
+      <div class="grid g-4">
+        ${statCard('Active licenses', empty ? '0' : String(holders.length), empty ? 'No agents signed in' : 'Signed in right now', 'brand')}
+        ${statCard('Available licenses', empty ? '12' : '7', 'Of 12 seats')}
+        ${statCard('Pending requests', empty ? '0' : '2', empty ? 'Nothing waiting' : '1 needs your approval')}
+        ${statCard('Completed today', empty ? '0' : '9', empty ? 'Nothing yet today' : 'All verified')}
+      </div>
+
+      <div class="grid g-2-1">
+        <div class="card">
+          <div class="card-head">
+            <h2>Recent requests</h2>
+            <button class="btn ghost sm" data-act="goto" data-page="requests">View all${icons.chevron}</button>
+          </div>
+          ${empty
+            ? emptyState('inbox', 'No requests yet',
+                'When someone asks ReadySupport to do something — here or in Discord — it will show up in this list.',
+                `<button class="btn primary" data-act="new-request">${icons.plus}New request</button>`)
+            : h`<div class="list">
+                ${recent.map((r) => h`
+                  <div class="list-row clickable" data-act="open-request" data-id="${r.id}">
+                    ${kindDot(r.kind)}
+                    <span class="strong" style="min-width:118px">${esc(r.action)}</span>
+                    <span class="muted grow truncate">${esc(r.target)}</span>
+                    ${pill(r.status)}
+                    ${rid(r.id)}
+                  </div>`).join('')}
+              </div>`}
+        </div>
+
+        <div class="stack gap-16">
+          <div class="card">
+            <div class="card-head"><h2>Needs attention</h2></div>
+            <div class="card-body stack gap-10">
+              ${empty
+                ? `<p class="muted tiny">Nothing needs attention.</p>`
+                : h`
+                  ${!CONNECTED() ? h`
+                    <div class="alert danger">
+                      ${icons.alert}
+                      <div><b>Readymode sign-in required.</b> Two requests are held until someone reconnects.</div>
+                    </div>` : ''}
+                  <div class="alert warn">
+                    ${icons.alert}
+                    <div>
+                      <b>Deactivating Dana Lee needs a second approver.</b>
+                      Rosa asked for it — someone else has to confirm.
+                      <div style="margin-top:7px">
+                        <button class="btn sm" data-act="open-request" data-id="1046">Review ${rid(1046, true)}</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="alert">
+                    ${icons.info}
+                    <div><b>Clearing a license failed for Marcus Smith.</b> Two accounts share that name — pick the right one to continue.</div>
+                  </div>`}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Using licenses</h2>
+              <button class="btn ghost sm" data-act="goto" data-page="licenses">Licenses${icons.chevron}</button>
+            </div>
+            ${empty
+              ? emptyState('key', 'Nobody is signed in', 'License usage will appear here as agents sign in to Readymode.')
+              : h`<div class="list">
+                  ${holders.slice(0, 5).map((a) => h`
+                    <div class="list-row clickable" data-act="open-agent" data-id="${a.id}">
+                      <div class="avatar">${initials(a.name)}</div>
+                      <div class="stack grow" style="min-width:0">
+                        <span class="strong truncate">${esc(a.name)}</span>
+                        <span class="tiny muted">${esc(a.presence)} · ${esc(a.connected)}</span>
+                      </div>
+                      ${a.onCall ? `<span class="pill warn"><span class="dot"></span>On a call</span>` : ''}
+                    </div>`).join('')}
+                </div>`}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Completed today</h2>
+          <button class="btn ghost sm" data-act="goto" data-page="activity">Full activity${icons.chevron}</button>
+        </div>
+        ${empty
+          ? emptyState('check', 'Nothing completed yet today', 'Finished actions appear here with a link to their evidence.')
+          : h`<div class="list">
+              ${ACTIVITY.filter((a) => a.result === 'ok').slice(0, 4).map((a) => h`
+                <div class="list-row">
+                  ${kindDot(a.kind)}
+                  <span class="strong" style="min-width:150px">${esc(a.action)}</span>
+                  <span class="muted grow truncate">${esc(a.target)}</span>
+                  <span class="tiny dim nums">${esc(a.time)}</span>
+                  ${rid(a.rid)}
+                </div>`).join('')}
+            </div>`}
+      </div>
+    </div>`;
+};
+
+const overviewLoading = () => h`
+  <div class="page-head">
+    <div class="stack gap-8">
+      <div class="sk" style="width:230px;height:22px"></div>
+      <div class="sk" style="width:290px;height:13px"></div>
+    </div>
+  </div>
+  <div class="stack gap-16">
+    <div class="card"><div class="card-body stack gap-12">
+      <div class="sk" style="width:210px;height:16px"></div>
+      <div class="sk" style="width:60%"></div>
+      <div class="row gap-24" style="margin-top:6px">
+        ${[0,1,2].map(() => `<div class="stack gap-6 grow"><div class="sk" style="width:70px;height:9px"></div><div class="sk" style="width:110px"></div></div>`).join('')}
+      </div>
+    </div></div>
+    <div class="grid g-4">
+      ${[0,1,2,3].map(() => `<div class="card stat stack gap-10"><div class="sk" style="width:80px;height:10px"></div><div class="sk" style="width:52px;height:26px"></div><div class="sk" style="width:96px;height:9px"></div></div>`).join('')}
+    </div>
+    <div class="grid g-2-1">
+      <div class="card"><div class="card-head"><div class="sk" style="width:120px;height:13px"></div></div>
+        <div class="stack">${[0,1,2,3,4].map(() => `<div class="list-row"><div class="sk" style="width:100%"></div></div>`).join('')}</div>
+      </div>
+      <div class="card"><div class="card-head"><div class="sk" style="width:110px;height:13px"></div></div>
+        <div class="card-body stack gap-10">${[0,1,2].map(() => `<div class="sk" style="height:44px"></div>`).join('')}</div>
+      </div>
+    </div>
+  </div>`;
+
+/* --- Requests ------------------------------------------------------------ */
+const filteredRequests = () => {
+  const f = state.filters;
+  return REQUESTS.filter((r) => {
+    if (f.status !== 'all' && r.status !== f.status) return false;
+    if (f.action !== 'all' && r.action !== f.action) return false;
+    if (f.by !== 'all' && r.by !== f.by) return false;
+    if (f.q && !(`${r.action} ${r.target} ${r.by} RS-${r.id}`.toLowerCase().includes(f.q.toLowerCase()))) return false;
+    return true;
+  });
+};
+
+const pageRequests = () => {
+  const rows = state.demo === 'empty' ? [] : filteredRequests();
+  const requesters = [...new Set(REQUESTS.map((r) => r.by))];
+
+  return h`
+    <div class="page-head">
+      <div>
+        <h1>Requests</h1>
+        <p class="sub">Everything ReadySupport has been asked to do, and where each one stands.</p>
+      </div>
+      <button class="btn primary" data-act="new-request">${icons.plus}New request</button>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div class="row wrap gap-8">
+          <div class="search grow" style="max-width:280px">
+            ${icons.search}
+            <input class="input" id="reqSearch" placeholder="Search requests or RS-1048" value="${esc(state.filters.q)}">
+          </div>
+          <select class="select" id="fStatus" style="width:170px">
+            <option value="all">All statuses</option>
+            ${Object.entries(STATUS).map(([k, s]) => `<option value="${k}" ${state.filters.status === k ? 'selected' : ''}>${s.label}</option>`).join('')}
+          </select>
+          <select class="select" id="fAction" style="width:170px">
+            <option value="all">All actions</option>
+            ${[...new Set(REQUESTS.map((r) => r.action))].map((a) => `<option ${state.filters.action === a ? 'selected' : ''}>${a}</option>`).join('')}
+          </select>
+          <select class="select" id="fBy" style="width:165px">
+            <option value="all">Anyone</option>
+            ${requesters.map((p) => `<option ${state.filters.by === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}
+          </select>
+          <select class="select" style="width:145px">
+            <option>Last 7 days</option><option>Today</option><option>Last 30 days</option><option>All time</option>
+          </select>
+          ${(state.filters.status !== 'all' || state.filters.action !== 'all' || state.filters.by !== 'all' || state.filters.q)
+            ? `<button class="btn ghost sm" data-act="clear-filters">Clear</button>` : ''}
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:96px">Request</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Requested by</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Completed</th>
+              <th style="width:44px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.demo === 'loading' ? skeletonRows(8, 8) : ''}
+            ${state.demo === 'error' ? `<tr><td colspan="8" style="padding:0">${errorState('Requests')}</td></tr>` : ''}
+            ${state.demo !== 'loading' && state.demo !== 'error' && rows.length === 0
+              ? `<tr><td colspan="8" style="padding:0">${
+                  state.demo === 'empty'
+                    ? emptyState('inbox', 'No requests yet', 'Requests made here or in Discord will appear in this table, each with its own ID so it can be traced.', `<button class="btn primary" data-act="new-request">${icons.plus}New request</button>`)
+                    : emptyState('search', 'No requests match those filters', 'Try widening the date range or clearing a filter.', `<button class="btn" data-act="clear-filters">Clear filters</button>`)
+                }</td></tr>` : ''}
+            ${state.demo === 'loading' || state.demo === 'error' ? '' : rows.map((r) => h`
+              <tr class="clickable" data-act="open-request" data-id="${r.id}">
+                <td>${rid(r.id)}</td>
+                <td><span class="row gap-8">${kindDot(r.kind)}<span class="strong">${esc(r.action)}</span></span></td>
+                <td>${esc(r.target)}</td>
+                <td><span class="muted">${esc(r.by)}</span> <span class="tiny dim">· ${r.via}</span></td>
+                <td>${pill(r.status)}</td>
+                <td class="muted nums">${esc(r.created)}</td>
+                <td class="muted nums">${esc(r.done)}</td>
+                <td><button class="btn icon sm ghost" data-act="row-menu" data-id="${r.id}" aria-label="More">${icons.dots}</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+};
+
+/* --- Agents -------------------------------------------------------------- */
+const pageAgents = () => {
+  const q = state.agentQuery.toLowerCase();
+  const rows = state.demo === 'empty' ? [] : AGENTS.filter((a) =>
+    !q || `${a.name} ${a.user} ${a.email} ${a.team} ${a.campaign}`.toLowerCase().includes(q));
+
+  return h`
+    <div class="page-head">
+      <div>
+        <h1>Agents</h1>
+        <p class="sub">Every Readymode account ReadySupport can see, and what it is doing right now.</p>
+      </div>
+      <button class="btn primary" data-act="quick" data-kind="create">${icons.plus}Create account</button>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div class="row wrap gap-8">
+          <div class="search grow" style="max-width:300px">
+            ${icons.search}
+            <input class="input" id="agentSearch" placeholder="Search name, username or email" value="${esc(state.agentQuery)}">
+          </div>
+          <select class="select" style="width:150px"><option>All teams</option><option>Team A</option><option>Team B</option><option>Team C</option></select>
+          <select class="select" style="width:160px"><option>All campaigns</option><option>Vantage</option><option>Horizon</option></select>
+          <select class="select" style="width:160px"><option>Any license state</option><option>In use</option><option>Not in use</option></select>
+          <span class="grow"></span>
+          <span class="tiny dim nums">${rows.length} of ${AGENTS.length}</span>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Agent</th><th>Username</th><th>Role</th><th>Team</th><th>Campaign</th>
+              <th>License</th><th>Account</th><th>Last activity</th><th style="width:44px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.demo === 'loading' ? skeletonRows(7, 9) : ''}
+            ${state.demo === 'error' ? `<tr><td colspan="9" style="padding:0">${errorState('Agents')}</td></tr>` : ''}
+            ${state.demo !== 'loading' && state.demo !== 'error' && rows.length === 0
+              ? `<tr><td colspan="9" style="padding:0">${
+                  state.demo === 'empty'
+                    ? emptyState('users', 'No agents found yet', 'ReadySupport lists agents as it sees them in Readymode. Run a license check to populate this.', `<button class="btn" data-act="quick" data-kind="usage">Check license usage</button>`)
+                    : emptyState('search', 'Nobody matches that search', 'Check the spelling, or search by username instead.')
+                }</td></tr>` : ''}
+            ${state.demo === 'loading' || state.demo === 'error' ? '' : rows.map((a) => h`
+              <tr class="clickable" data-act="open-agent" data-id="${a.id}">
+                <td>${person(a.name, a.email)}</td>
+                <td class="mono">${esc(a.user)}</td>
+                <td>${esc(a.role)}</td>
+                <td class="muted">${esc(a.team)}</td>
+                <td class="muted">${esc(a.campaign)}</td>
+                <td>${licensePill(a)}</td>
+                <td>${accountPill(a)}</td>
+                <td class="muted nums">${esc(a.last)}</td>
+                <td><button class="btn icon sm ghost" data-act="agent-menu" data-id="${a.id}" aria-label="More">${icons.dots}</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="tiny dim" style="margin-top:12px">
+      <span class="kind read" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>Read only
+      <span class="kind write" style="display:inline-block;vertical-align:middle;margin:0 5px 0 14px"></span>Changes an account
+      <span class="kind destroy" style="display:inline-block;vertical-align:middle;margin:0 5px 0 14px"></span>Removes access
+    </p>`;
+};
+
+const pageAgentDetail = () => {
+  const a = AGENTS.find((x) => x.id === state.agentId) ?? AGENTS[0];
+  const theirs = REQUESTS.filter((r) => r.target.includes(a.name.split(' ')[0])).slice(0, 4);
+
+  return h`
+    <button class="btn ghost sm" data-act="goto" data-page="agents" style="margin-bottom:14px">
+      <span style="transform:rotate(180deg);display:inline-flex">${icons.chevron}</span>Agents
+    </button>
+
+    <div class="page-head">
+      <div class="row gap-14">
+        <div class="avatar lg">${initials(a.name)}</div>
+        <div class="stack gap-6">
+          <h1>${esc(a.name)}</h1>
+          <div class="row gap-8 wrap">
+            <span class="mono muted">${esc(a.user)}</span>
+            <span class="dim">·</span>
+            <span class="muted">${esc(a.email)}</span>
+            ${accountPill(a)}
+          </div>
+        </div>
+      </div>
+      <div class="row gap-8">
+        <button class="btn" data-act="noop">${icons.external}Open in Readymode</button>
+        <button class="btn primary" data-act="agent-menu" data-id="${a.id}">Actions${icons.down}</button>
+      </div>
+    </div>
+
+    <div class="grid g-2-1">
+      <div class="stack gap-16">
+        <div class="card">
+          <div class="card-head"><h2>Right now in Readymode</h2><span class="tiny dim">Checked 40 seconds ago</span></div>
+          <div class="card-body">
+            <div class="grid g-3" style="gap:14px">
+              <div class="stack gap-4">
+                <span class="eyebrow">Presence</span>
+                <span class="row gap-6"><span class="status-dot ${a.presence === 'Offline' ? 'warn' : 'ok'}"></span><span class="strong">${esc(a.presence)}</span></span>
+              </div>
+              <div class="stack gap-4"><span class="eyebrow">License</span><span>${licensePill(a)}</span></div>
+              <div class="stack gap-4"><span class="eyebrow">Time connected</span><span class="strong nums">${esc(a.connected)}</span></div>
+            </div>
+            ${a.onCall ? h`
+              <div class="alert warn" style="margin-top:14px">
+                ${icons.alert}
+                <div><b>${esc(a.name.split(' ')[0])} is on a call.</b> Clearing the license now would drop it. An owner or admin has to confirm before ReadySupport will continue.</div>
+              </div>` : ''}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Account</h2></div>
+          <div class="card-body">
+            <dl class="defs">
+              <dt>Readymode ID</dt><dd class="mono">${esc(a.id)}</dd>
+              <dt>Username</dt><dd class="mono">${esc(a.user)}</dd>
+              <dt>Email</dt><dd>${esc(a.email)}</dd>
+              <dt>Role</dt><dd>${esc(a.role)}</dd>
+              <dt>License type</dt><dd>${esc(a.license)}</dd>
+              <dt>Team</dt><dd>${esc(a.team)}</dd>
+              <dt>Campaign</dt><dd>${esc(a.campaign)}</dd>
+              <dt>Queue</dt><dd>${esc(a.queue)}</dd>
+              <dt>Account status</dt><dd>${accountPill(a)}</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>ReadySupport actions on this account</h2></div>
+          ${theirs.length ? h`
+            <div class="list">
+              ${theirs.map((r) => h`
+                <div class="list-row clickable" data-act="open-request" data-id="${r.id}">
+                  ${kindDot(r.kind)}
+                  <span class="strong" style="min-width:130px">${esc(r.action)}</span>
+                  <span class="muted grow truncate">by ${esc(r.by)}</span>
+                  ${pill(r.status)}${rid(r.id)}
+                </div>`).join('')}
+            </div>`
+            : emptyState('inbox', 'No actions on this account', 'Nothing has been changed here through ReadySupport.')}
+        </div>
+      </div>
+
+      <div class="stack gap-16">
+        <div class="card">
+          <div class="card-head"><h2>Quick actions</h2></div>
+          <div class="card-body stack gap-8">
+            <button class="btn block" style="justify-content:flex-start" data-act="confirm-action" data-kind="clear" data-id="${a.id}">
+              ${kindDot('write')}Clear license
+            </button>
+            <button class="btn block" style="justify-content:flex-start" data-act="confirm-action" data-kind="reset" data-id="${a.id}">
+              ${kindDot('write')}Reset password
+            </button>
+            <button class="btn block" style="justify-content:flex-start;color:var(--danger)" data-act="confirm-action" data-kind="deactivate" data-id="${a.id}">
+              ${kindDot('destroy')}Deactivate account
+            </button>
+            <p class="tiny dim" style="margin-top:2px">Every one of these shows you exactly what will be submitted before anything happens.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Activity</h2></div>
+          <div class="card-body">
+            <div class="timeline">
+              <div class="tl-item ok"><div class="strong">Signed in to Readymode</div><div class="t">Today 11:48 AM</div></div>
+              <div class="tl-item"><div class="strong">Assigned to ${esc(a.campaign)}</div><div class="t">12 March</div></div>
+              <div class="tl-item brand"><div class="strong">Password reset by ReadySupport</div><div class="t">8 March · ${rid(1002, true)}</div></div>
+              <div class="tl-item"><div class="strong">Account created</div><div class="t">2 January</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+};
+
+/* --- Licenses ------------------------------------------------------------ */
+const pageLicenses = () => {
+  const holders = state.demo === 'empty' ? [] : AGENTS.filter((a) => a.licenseInUse);
+  const total = 12;
+  const used = holders.length;
+  const idle = holders.filter((a) => a.presence === 'Idle').length;
+  const pct = Math.round((used / total) * 100);
+
+  return h`
+    <div class="page-head">
+      <div>
+        <h1>Licenses</h1>
+        <p class="sub">Who is using a seat right now, and which ones are sitting idle.</p>
+      </div>
+      <button class="btn primary" data-act="clear-inactive" ${idle === 0 ? 'disabled' : ''}>
+        ${icons.key}Clear inactive licenses${idle ? ` (${idle})` : ''}
+      </button>
+    </div>
+
+    <div class="stack gap-16">
+      <div class="card">
+        <div class="card-body">
+          <div class="grid g-4" style="gap:20px">
+            <div class="stat" style="padding:0"><div class="k">Total licenses</div><div class="v nums">${total}</div></div>
+            <div class="stat" style="padding:0"><div class="k">In use</div><div class="v nums" style="color:var(--brand)">${used}</div></div>
+            <div class="stat" style="padding:0"><div class="k">Available</div><div class="v nums">${total - used}</div></div>
+            <div class="stat" style="padding:0"><div class="k">Usage</div><div class="v nums">${pct}%</div></div>
+          </div>
+
+          <div style="margin-top:18px">
+            <div class="meter" style="height:10px">
+              <span class="used" style="width:${((used - idle) / total) * 100}%"></span>
+              <span class="idle" style="width:${(idle / total) * 100}%"></span>
+            </div>
+            <div class="row gap-16 wrap" style="margin-top:9px">
+              <span class="row gap-6 tiny muted"><span class="kind" style="background:var(--brand)"></span>${used - idle} active</span>
+              <span class="row gap-6 tiny muted"><span class="kind" style="background:var(--brand-line)"></span>${idle} idle for over 30 minutes</span>
+              <span class="row gap-6 tiny muted"><span class="kind" style="background:var(--surface-3);border:1px solid var(--border)"></span>${total - used} free</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      ${idle > 0 ? h`
+        <div class="alert warn">
+          ${icons.alert}
+          <div>
+            <b>${idle} licenses are held by agents who have been idle for more than 30 minutes.</b>
+            Clearing them frees the seats. You will see exactly who is affected before anything happens.
+          </div>
+        </div>` : ''}
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Agents holding a license</h2>
+          <span class="tiny dim">Live from Readymode · checked 40 seconds ago</span>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead>
+              <tr><th>Agent</th><th>Signed in</th><th>Status</th><th>Time connected</th><th>Last activity</th><th style="width:130px"></th></tr>
+            </thead>
+            <tbody>
+              ${state.demo === 'loading' ? skeletonRows(5, 6) : ''}
+              ${state.demo === 'error' ? `<tr><td colspan="6" style="padding:0">${errorState('License usage')}</td></tr>` : ''}
+              ${state.demo !== 'loading' && state.demo !== 'error' && holders.length === 0
+                ? `<tr><td colspan="6" style="padding:0">${emptyState('key', 'No licenses in use', 'Every seat is free. Agents appear here as they sign in to Readymode.')}</td></tr>` : ''}
+              ${state.demo === 'loading' || state.demo === 'error' ? '' : holders.map((a) => h`
+                <tr>
+                  <td>${person(a.name, a.user)}</td>
+                  <td><span class="row gap-6"><span class="status-dot ok"></span>Yes</span></td>
+                  <td>${a.onCall
+                    ? `<span class="pill warn"><span class="dot"></span>On a call</span>`
+                    : a.presence === 'Idle'
+                      ? `<span class="pill neutral"><span class="dot"></span>Idle</span>`
+                      : `<span class="pill ok"><span class="dot"></span>${esc(a.presence)}</span>`}</td>
+                  <td class="nums muted">${esc(a.connected)}</td>
+                  <td class="nums muted">${esc(a.last)}</td>
+                  <td><button class="btn sm" data-act="confirm-action" data-kind="clear" data-id="${a.id}">Clear license</button></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+};
+
+/* --- Activity ------------------------------------------------------------ */
+const resultPill = (r) => ({
+  ok:   `<span class="pill ok"><span class="dot"></span>Succeeded</span>`,
+  fail: `<span class="pill danger"><span class="dot"></span>Failed</span>`,
+  run:  `<span class="pill brand running"><span class="dot"></span>Running</span>`,
+  wait: `<span class="pill warn"><span class="dot"></span>Waiting</span>`,
+}[r]);
+
+const pageActivity = () => h`
+  <div class="page-head">
+    <div>
+      <h1>Activity</h1>
+      <p class="sub">A permanent record of everything ReadySupport has done. Entries cannot be edited or removed.</p>
+    </div>
+    <button class="btn" data-act="noop">${icons.file}Export</button>
+  </div>
+
+  <div class="card">
+    <div class="card-body tight">
+      <div class="row wrap gap-8">
+        <div class="search grow" style="max-width:300px">
+          ${icons.search}<input class="input" placeholder="Search people, accounts or RS-1048">
+        </div>
+        <select class="select" style="width:160px"><option>Everyone</option>${TEAM.map((t) => `<option>${esc(t.name)}</option>`).join('')}</select>
+        <select class="select" style="width:170px"><option>All results</option><option>Succeeded</option><option>Failed</option><option>Waiting</option></select>
+        <select class="select" style="width:150px"><option>Last 7 days</option><option>Today</option><option>Last 90 days</option></select>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th style="width:170px">Time</th><th>Person</th><th>Action</th><th>Target</th><th>Result</th><th>Request</th><th style="width:96px">Evidence</th></tr>
+        </thead>
+        <tbody>
+          ${state.demo === 'loading' ? skeletonRows(9, 7) : ''}
+          ${state.demo === 'error' ? `<tr><td colspan="7" style="padding:0">${errorState('Activity')}</td></tr>` : ''}
+          ${state.demo === 'empty' ? `<tr><td colspan="7" style="padding:0">${emptyState('activity', 'Nothing recorded yet', 'The audit log fills in as ReadySupport works. Every entry is permanent.')}</td></tr>` : ''}
+          ${['loading', 'error', 'empty'].includes(state.demo) ? '' : ACTIVITY.map((a) => h`
+            <tr>
+              <td class="nums muted">${esc(a.time)}</td>
+              <td>${a.user === 'ReadySupport'
+                ? `<span class="row gap-8"><span class="avatar" style="background:var(--ink);color:#fff;border-color:var(--ink)">RS</span><span class="strong">ReadySupport</span></span>`
+                : a.user === 'Unknown user'
+                  ? `<span class="row gap-8"><span class="avatar grey">?</span><span class="muted">Unknown user</span></span>`
+                  : person(a.user)}</td>
+              <td><span class="row gap-8">${kindDot(a.kind)}<span class="strong">${esc(a.action)}</span></span></td>
+              <td class="muted">${esc(a.target)}</td>
+              <td>${resultPill(a.result)}</td>
+              <td>${a.rid ? `<button class="btn ghost sm" data-act="open-request" data-id="${a.rid}">${rid(a.rid, true)}</button>` : '<span class="dim">—</span>'}</td>
+              <td>${a.ev ? `<button class="btn ghost sm" data-act="noop">${icons.image}View</button>` : '<span class="dim tiny">None</span>'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-foot row between">
+      <span class="tiny muted">Showing 12 of 4,318 entries</span>
+      <span class="row gap-6 tiny dim">${icons.lock}<span>Append only — kept for 24 months</span></span>
+    </div>
+  </div>`;
+
+/* --- Connections --------------------------------------------------------- */
+const connStateBits = (state_) => ({
+  ok:   { pill: `<span class="pill ok"><span class="dot"></span>Connected</span>`, dot: 'ok' },
+  warn: { pill: `<span class="pill warn"><span class="dot"></span>Needs attention</span>`, dot: 'warn' },
+  down: { pill: `<span class="pill danger"><span class="dot"></span>Disconnected</span>`, dot: 'danger' },
+}[state_]);
+
+const pageConnections = () => {
+  const down = !CONNECTED();
+
+  return h`
+    <div class="page-head">
+      <div>
+        <h1>Connections</h1>
+        <p class="sub">The services ReadySupport depends on. Keys and passwords are never shown here.</p>
+      </div>
+    </div>
+
+    <div class="stack gap-16">
+      <div class="card conn ${down ? 'danger' : ''}">
+        <div class="card-head">
+          <div class="row gap-10">
+            <span class="status-dot ${down ? 'danger' : 'ok'} ring"></span>
+            <h2>Readymode</h2>
+            ${connStateBits(down ? 'down' : 'ok').pill}
+          </div>
+          <div class="row gap-8">
+            <button class="btn sm" data-act="test-connection">${icons.refresh}Test connection</button>
+            <button class="btn sm ${down ? 'primary' : ''}" data-act="reconnect">Reconnect</button>
+          </div>
+        </div>
+        <div class="card-body">
+          ${down ? h`
+            <div class="alert danger" style="margin-bottom:16px">
+              ${icons.alert}
+              <div>
+                <b>The Readymode session has ended.</b>
+                Two requests are waiting and will run as soon as someone signs back in. Nothing has been lost.
+              </div>
+            </div>` : ''}
+          <dl class="defs">
+            <dt>Account URL</dt><dd class="mono">northlineops.readymode.com</dd>
+            <dt>Admin username</dt><dd class="mono">nl••••••••min</dd>
+            <dt>Password</dt><dd class="muted">Held as a secret. Never shown, logged, or sent anywhere.</dd>
+            <dt>Last successful sign-in</dt><dd class="nums">${down ? 'Today 2:14 PM' : 'Today 8:02 AM'}</dd>
+            <dt>Last checked</dt><dd class="nums">${down ? '18 minutes ago' : '40 seconds ago'}</dd>
+            <dt>Browser session</dt><dd class="mono">bb_7a41c9d0e92 <span class="tiny dim">· ${down ? 'ended' : 'ready'}</span></dd>
+            <dt>Interface map</dt><dd>68 of 68 pages mapped <span class="tiny dim">· last checked 12 March</span></dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="grid g-2">
+        ${CONNECTIONS.map((c) => h`
+          <div class="card">
+            <div class="card-body">
+              <div class="row between gap-12">
+                <div class="row gap-10">
+                  <span class="qi" style="width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:var(--surface-3);color:var(--ink-2)">
+                    <span style="width:16px;height:16px;display:block">${icons[c.icon]}</span>
+                  </span>
+                  <div class="stack">
+                    <span class="strong">${esc(c.name)}</span>
+                    <span class="tiny muted">${esc(c.detail)}</span>
+                  </div>
+                </div>
+                ${connStateBits(c.state).pill}
+              </div>
+              <div class="row between gap-12" style="margin-top:14px">
+                <span class="tiny dim">${esc(c.sub)}</span>
+                <button class="btn ghost sm" data-act="noop">Manage${icons.chevron}</button>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>How this looks in Discord</h2>
+          <span class="tiny dim">Preview</span>
+        </div>
+        <div class="card-body stack gap-14">
+          <p class="muted tiny">The same rules apply there: ReadySupport confirms before it changes anything, and a password is only ever sent in a reply nobody else can see.</p>
+
+          <div class="dc">
+            <div class="dc-msg">
+              <div class="dc-av">${icons.shield}</div>
+              <div class="grow" style="min-width:0">
+                <div><span class="dc-name">ReadySupport</span><span class="dc-tag">APP</span><span class="dc-time">Today at 3:41 PM</span></div>
+                <div>I understood your request. Confirm and I will make the change.</div>
+                <div class="dc-embed brand">
+                  <h4>Create account</h4>
+                  <div class="dc-fields">
+                    <div class="dc-f"><div class="k">Agent</div><div class="v">Marcus Smith</div></div>
+                    <div class="dc-f"><div class="k">Username</div><div class="v">msmith3</div></div>
+                    <div class="dc-f"><div class="k">Email</div><div class="v">marcus@example.com</div></div>
+                    <div class="dc-f"><div class="k">Role</div><div class="v">Agent</div></div>
+                    <div class="dc-f"><div class="k">License</div><div class="v">Standard</div></div>
+                    <div class="dc-f"><div class="k">Campaign</div><div class="v">Vantage</div></div>
+                  </div>
+                  <div class="dc-foot">Requested by Kaeden Vaughns · expires in 10 minutes</div>
+                  <div class="dc-btns">
+                    <button class="dc-btn primary">Confirm</button>
+                    <button class="dc-btn">Edit</button>
+                    <button class="dc-btn">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid g-2" style="gap:14px">
+            <div class="dc">
+              <div class="dc-msg">
+                <div class="dc-av">${icons.shield}</div>
+                <div class="grow" style="min-width:0">
+                  <div><span class="dc-name">ReadySupport</span><span class="dc-tag">APP</span><span class="dc-time">3:42 PM</span></div>
+                  <div class="dc-embed">
+                    <h4>Account created successfully.</h4>
+                    <div class="dc-fields" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+                      <div class="dc-f"><div class="k">Agent</div><div class="v">Marcus Smith</div></div>
+                      <div class="dc-f"><div class="k">Username</div><div class="v">msmith3</div></div>
+                      <div class="dc-f"><div class="k">Role</div><div class="v">Agent</div></div>
+                      <div class="dc-f"><div class="k">License</div><div class="v">Standard</div></div>
+                      <div class="dc-f"><div class="k">Campaign</div><div class="v">Vantage</div></div>
+                      <div class="dc-f"><div class="k">Completed</div><div class="v">3:42 PM EST</div></div>
+                    </div>
+                    <div class="dc-foot">Request RS-1048 · the temporary password was sent to you privately</div>
+                    <div class="dc-btns"><button class="dc-btn">View details</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="dc">
+              <div class="dc-msg">
+                <div class="dc-av">${icons.shield}</div>
+                <div class="grow" style="min-width:0">
+                  <div><span class="dc-name">ReadySupport</span><span class="dc-tag">APP</span><span class="dc-time">2:44 PM</span></div>
+                  <div class="dc-embed danger">
+                    <h4>I stopped without changing anything</h4>
+                    <div style="margin-top:2px">I found two accounts named Marcus Smith. Select the correct one and I will continue.</div>
+                    <div class="dc-foot">Request RS-1044</div>
+                    <div class="dc-btns">
+                      <button class="dc-btn">Marcus Smith · msmith · Team B</button>
+                      <button class="dc-btn">Marcus Smith · msmith2 · Team C</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dc">
+            <div class="dc-msg">
+              <div class="dc-av">${icons.shield}</div>
+              <div class="grow" style="min-width:0">
+                <div><span class="dc-name">ReadySupport</span><span class="dc-tag">APP</span><span class="dc-time">3:41 PM</span></div>
+                <div class="dc-embed warn">
+                  <h4>Creating the account in Readymode…</h4>
+                  <div style="margin-top:2px">Checking the username is free, then filling in the form. This usually takes about 20 seconds.</div>
+                  <div class="dc-foot">Request RS-1048</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+};
+
+/* --- Team ---------------------------------------------------------------- */
+const rolePill = (role) => ({
+  Owner:   `<span class="pill brand"><span class="dot"></span>Owner</span>`,
+  Admin:   `<span class="pill brand"><span class="dot"></span>Admin</span>`,
+  Support: `<span class="pill neutral"><span class="dot"></span>Support</span>`,
+  Viewer:  `<span class="pill neutral"><span class="dot"></span>Viewer</span>`,
+}[role]);
+
+const pageTeam = () => h`
+  <div class="page-head">
+    <div>
+      <h1>Team</h1>
+      <p class="sub">Who can use ReadySupport, and what each of them is allowed to do.</p>
+    </div>
+    <button class="btn primary" data-act="invite">${icons.plus}Invite someone</button>
+  </div>
+
+  <div class="stack gap-16">
+    <div class="card">
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>Person</th><th>Discord</th><th>Role</th><th>Status</th><th>Last active</th><th style="width:44px"></th></tr></thead>
+          <tbody>
+            ${TEAM.map((t) => h`
+              <tr>
+                <td>${person(t.name, t.email)}</td>
+                <td><span class="row gap-7"><span style="width:15px;height:15px;color:#5865F2;display:block">${icons.discord}</span><span class="mono">${esc(t.discord)}</span></span></td>
+                <td>${rolePill(t.role)}</td>
+                <td>${t.status === 'active'
+                  ? `<span class="pill ok"><span class="dot"></span>Active</span>`
+                  : `<span class="pill warn"><span class="dot"></span>Invited</span>`}</td>
+                <td class="muted nums">${esc(t.last)}</td>
+                <td><button class="btn icon sm ghost" data-act="team-menu" data-name="${esc(t.name)}" aria-label="More">${icons.dots}</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>What each role can do</h2></div>
+      <div class="card-body stack gap-12">
+        ${Object.entries(ROLE_POWERS).map(([role, text]) => h`
+          <div class="row gap-12" style="align-items:flex-start">
+            <span style="min-width:92px">${rolePill(role)}</span>
+            <span class="muted grow">${esc(text)}</span>
+          </div>`).join('')}
+        <p class="tiny dim" style="margin-top:2px">
+          Roles live in ReadySupport, not in Discord. Changing someone's Discord role does not change what they can do here.
+        </p>
+      </div>
+    </div>
+  </div>`;
+
+/* --- Settings ------------------------------------------------------------ */
+const settingRow = (title, desc, control) => h`
+  <div class="row between gap-16 wrap" style="padding:14px 0;border-bottom:1px solid var(--border)">
+    <div class="stack gap-2" style="max-width:56ch">
+      <span class="strong">${esc(title)}</span>
+      <span class="tiny muted">${esc(desc)}</span>
+    </div>
+    <div>${control}</div>
+  </div>`;
+
+const toggle = (on = true) => `<button class="switch" role="switch" aria-checked="${on}" data-act="toggle"></button>`;
+
+const SETTINGS_SECTIONS = [
+  { key: 'organization', label: 'Organization', icon: 'building' },
+  { key: 'discord',      label: 'Discord',      icon: 'discord' },
+  { key: 'readymode',    label: 'Readymode',    icon: 'plug' },
+  { key: 'permissions',  label: 'Permissions',  icon: 'users' },
+  { key: 'approvals',    label: 'Approval rules', icon: 'check' },
+  { key: 'notifications',label: 'Notifications', icon: 'bell' },
+  { key: 'security',     label: 'Security',     icon: 'lock' },
+  { key: 'retention',    label: 'Audit retention', icon: 'file' },
+];
+
+let settingsSection = 'organization';
+
+const settingsPanel = () => {
+  switch (settingsSection) {
+    case 'discord': return h`
+      ${settingRow('Approved server', 'ReadySupport ignores every message from anywhere else.',
+        `<select class="select" style="width:220px"><option>Northline Ops</option></select>`)}
+      ${settingRow('Command channel', 'Where slash commands are accepted.',
+        `<select class="select" style="width:220px"><option>#readysupport</option><option>#ops</option></select>`)}
+      ${settingRow('Plain-language channel', 'The one channel where people can just describe what they need.',
+        `<select class="select" style="width:220px"><option>#readysupport-requests</option></select>`)}
+      ${settingRow('Alerts channel', 'Where connection problems and failures are posted.',
+        `<select class="select" style="width:220px"><option>#readysupport-alerts</option></select>`)}
+      ${settingRow('Accept plain-language requests', 'Turn this off to require slash commands only.', toggle(true))}`;
+
+    case 'readymode': return h`
+      ${settingRow('Account URL', 'The Readymode instance ReadySupport administers.',
+        `<input class="input" style="width:280px" value="northlineops.readymode.com">`)}
+      ${settingRow('Admin username', 'Used only when a genuine sign-in is needed.',
+        `<input class="input mono" style="width:280px" value="nl••••••••min" disabled>`)}
+      ${settingRow('Admin password', 'Stored as a secret. It is never displayed, logged, or sent anywhere.',
+        `<button class="btn">Replace password</button>`)}
+      ${settingRow('Test mode', 'ReadySupport checks everything and stops before submitting. Turn this off to make real changes.',
+        toggle(false))}`;
+
+    case 'permissions': return h`
+      ${settingRow('Default role for new people', 'What someone gets when they are first invited.',
+        `<select class="select" style="width:180px"><option>Viewer</option><option>Support</option><option>Admin</option></select>`)}
+      ${settingRow('Let Support create accounts', 'Support can already clear licenses and reset passwords.', toggle(true))}
+      ${settingRow('Let Support deactivate accounts', 'Off by default. Deactivation is the hardest action to undo.', toggle(false))}`;
+
+    case 'approvals': return h`
+      ${settingRow('Confirm every change', 'Cannot be turned off. Nothing that changes Readymode runs without a person confirming it.',
+        `<button class="switch" role="switch" aria-checked="true" disabled style="opacity:.6;cursor:not-allowed"></button>`)}
+      ${settingRow('Deactivation needs a second approver', 'Someone other than the requester, with owner or admin access.', toggle(true))}
+      ${settingRow('Bulk actions need a second approver', 'Anything affecting more than one account at a time.', toggle(true))}
+      ${settingRow('Confirmation expires after', 'An unconfirmed request is cancelled once this passes.',
+        `<select class="select" style="width:150px"><option>10 minutes</option><option>5 minutes</option><option>30 minutes</option></select>`)}
+      ${settingRow('Idle threshold for clearing licenses', 'How long an agent must be idle before their seat counts as inactive.',
+        `<select class="select" style="width:150px"><option>30 minutes</option><option>15 minutes</option><option>1 hour</option></select>`)}`;
+
+    case 'notifications': return h`
+      ${settingRow('Who gets alerts', 'These people are messaged when something needs a human.',
+        `<button class="btn">Kaeden, Rosa${icons.down}</button>`)}
+      ${settingRow('Readymode sign-in expired', 'Always on — queued work stops until someone reconnects.',
+        `<button class="switch" role="switch" aria-checked="true" disabled style="opacity:.6;cursor:not-allowed"></button>`)}
+      ${settingRow('Three failures in a row', 'Usually means something systematic rather than one bad request.', toggle(true))}
+      ${settingRow('A request was refused', 'Someone without access tried to run something.', toggle(true))}
+      ${settingRow('Daily summary', 'One message each morning with what happened yesterday.', toggle(false))}`;
+
+    case 'security': return h`
+      ${settingRow('Rate limit per person', 'Blunts an accidental flood without getting in anyone’s way.',
+        `<select class="select" style="width:190px"><option>6 changes per minute</option><option>3 changes per minute</option></select>`)}
+      ${settingRow('Sign-in method', 'ReadySupport uses your Discord account. There is no separate password.',
+        `<span class="pill brand"><span class="dot"></span>Discord</span>`)}
+      ${settingRow('Session length', 'How long a dashboard session lasts before signing in again.',
+        `<select class="select" style="width:150px"><option>12 hours</option><option>8 hours</option><option>7 days</option></select>`)}`;
+
+    case 'retention': return h`
+      ${settingRow('Keep activity records for', 'Records cannot be edited or deleted before this passes.',
+        `<select class="select" style="width:160px"><option>24 months</option><option>12 months</option><option>Forever</option></select>`)}
+      ${settingRow('Keep screenshots for', 'Evidence images can contain agent names and email addresses.',
+        `<select class="select" style="width:160px"><option>90 days</option><option>30 days</option><option>12 months</option></select>`)}
+      <div class="alert" style="margin-top:16px">
+        ${icons.lock}
+        <div>Activity records are append only. Nobody — including an owner — can change or remove an entry once it is written.</div>
+      </div>`;
+
+    default: return h`
+      ${settingRow('Organization name', 'Shown in the sidebar and on Discord messages.',
+        `<input class="input" style="width:260px" value="${esc(ORG.name)}">`)}
+      ${settingRow('Time zone', 'Times throughout ReadySupport are shown in this zone.',
+        `<select class="select" style="width:260px"><option>Eastern Time (US &amp; Canada)</option><option>Central Time</option><option>Pacific Time</option><option>UTC</option></select>`)}
+      ${settingRow('Working hours', 'Used to decide when a daily summary is sent.',
+        `<div class="row gap-6"><input class="input nums" style="width:82px" value="09:00"><span class="muted">to</span><input class="input nums" style="width:82px" value="18:00"></div>`)}`;
+  }
+};
+
+const pageSettings = () => h`
+  <div class="page-head">
+    <div>
+      <h1>Settings</h1>
+      <p class="sub">How ReadySupport behaves for ${esc(ORG.name)}.</p>
+    </div>
+    <button class="btn primary" data-act="save-settings">Save changes</button>
+  </div>
+
+  <div class="grid settings-grid" id="settingsGrid">
+    <div class="card" style="align-self:start;overflow:hidden">
+      <div class="nav" style="padding:6px">
+        ${SETTINGS_SECTIONS.map((s) => h`
+          <button class="nav-item ${settingsSection === s.key ? 'active' : ''}" data-act="settings-section" data-key="${s.key}">
+            <span style="width:16px;height:16px;display:block;flex:none">${icons[s.icon]}</span>
+            <span>${s.label}</span>
+          </button>`).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>${SETTINGS_SECTIONS.find((s) => s.key === settingsSection).label}</h2>
+      </div>
+      <div class="card-body" style="padding-top:2px">${settingsPanel()}</div>
+    </div>
+  </div>`;
+
+/* --- Sign in ------------------------------------------------------------- */
+const signIn = () => h`
+  <div class="signin">
+    <div class="signin-card stack gap-16">
+      <div class="row gap-10" style="justify-content:center">
+        <div class="logo" style="width:34px;height:34px;border-radius:10px">
+          <span style="width:19px;height:19px;display:block">${icons.shield}</span>
+        </div>
+        <div class="stack">
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.02em">ReadySupport</span>
+          <span class="tiny dim">Readymode administration without the busywork.</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body stack gap-16" style="padding:22px">
+          <div class="stack gap-5">
+            <h1 style="font-size:19px">Sign in</h1>
+            <p class="muted tiny">ReadySupport uses your Discord account. There is no separate password to remember.</p>
+          </div>
+
+          <button class="btn primary lg block" data-act="do-signin">
+            <span style="width:17px;height:17px;display:block">${icons.discord}</span>
+            Continue with Discord
+          </button>
+
+          <div class="alert">
+            ${icons.info}
+            <div>Only people your owner has added can sign in. If it turns you away, ask them to add you.</div>
+          </div>
+        </div>
+      </div>
+
+      <p class="tiny dim" style="text-align:center">
+        Northline Operations · Having trouble? <a href="#" style="color:var(--brand);font-weight:500">Get help</a>
+      </p>
+    </div>
+  </div>`;
+
+/* --- New request flow ---------------------------------------------------- */
+const QUICK = [
+  { key: 'create',     kind: 'write',   icon: 'plus',   title: 'Create account',     sub: 'Add a new Readymode agent' },
+  { key: 'clear',      kind: 'write',   icon: 'key',    title: 'Clear license',      sub: 'Free the seat an agent is holding' },
+  { key: 'reset',      kind: 'write',   icon: 'lock',   title: 'Reset password',     sub: 'Issue a new temporary password' },
+  { key: 'deactivate', kind: 'destroy', icon: 'trash',  title: 'Deactivate account', sub: 'Needs a second approver' },
+  { key: 'status',     kind: 'read',    icon: 'user',   title: 'Check agent status', sub: 'Look someone up' },
+  { key: 'usage',      kind: 'read',    icon: 'activity', title: 'Check license usage', sub: 'See who is signed in' },
+];
+
+const EXAMPLE = 'Create a Readymode account for Marcus Smith and assign him to the Vantage campaign.';
+
+const newRequestStep1 = () => h`
+  <div class="modal wide" role="dialog" aria-modal="true" aria-label="New request">
+    <div class="modal-body" style="padding:26px 26px 20px">
+      <div class="stack gap-5" style="margin-bottom:16px">
+        <h1 style="font-size:20px">What do you need ReadySupport to do?</h1>
+        <p class="muted tiny">Describe it however you like. ReadySupport will turn it into a specific action and show it to you before anything happens.</p>
+      </div>
+
+      <textarea class="textarea" id="reqInput" rows="3"
+        placeholder="${esc(EXAMPLE)}"
+        style="font-size:15px;line-height:1.5"></textarea>
+
+      <div class="row between gap-10" style="margin-top:11px">
+        <button class="btn ghost sm" data-act="fill-example">Use the example</button>
+        <button class="btn primary" data-act="interpret" id="interpretBtn">Continue${icons.chevron}</button>
+      </div>
+
+      <div style="margin-top:22px">
+        <div class="eyebrow" style="margin-bottom:9px">Or pick an action</div>
+
+        <div class="stack gap-7">
+          <span class="tiny dim">Changes an account · needs your confirmation</span>
+          <div class="grid g-2" style="gap:8px">
+            ${QUICK.filter((q) => q.kind !== 'read').map((q) => h`
+              <button class="qa" data-act="quick" data-kind="${q.key}">
+                <span class="qi">${icons[q.icon]}</span>
+                <span class="stack grow">
+                  <span class="qt row gap-7">${kindDot(q.kind)}${q.title}</span>
+                  <span class="qs">${q.sub}</span>
+                </span>
+              </button>`).join('')}
+          </div>
+        </div>
+
+        <div class="stack gap-7" style="margin-top:14px">
+          <span class="tiny dim">Read only · runs straight away, changes nothing</span>
+          <div class="grid g-2" style="gap:8px">
+            ${QUICK.filter((q) => q.kind === 'read').map((q) => h`
+              <button class="qa" data-act="quick" data-kind="${q.key}">
+                <span class="qi">${icons[q.icon]}</span>
+                <span class="stack grow">
+                  <span class="qt row gap-7">${kindDot(q.kind)}${q.title}</span>
+                  <span class="qs">${q.sub}</span>
+                </span>
+              </button>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot split">
+      <span class="tiny dim">ReadySupport never acts on a guess. You confirm before anything changes.</span>
+      <button class="btn" data-act="close-overlay">Cancel</button>
+    </div>
+  </div>`;
+
+const confirmRow = (k, v, warn = false) => h`
+  <div class="row between gap-16" style="padding:9px 0;border-bottom:1px solid var(--border)">
+    <span class="muted" style="min-width:120px">${esc(k)}</span>
+    <span class="strong grow" style="text-align:right;${warn ? 'color:var(--warn)' : ''}">${v}</span>
+  </div>`;
+
+const newRequestConfirm = () => h`
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm request">
+    <div class="modal-head">
+      <div class="row gap-9" style="margin-bottom:3px">
+        ${kindDot('write')}<span class="eyebrow">Changes an account</span>
+      </div>
+      <h1 style="font-size:18px">Create a Readymode account</h1>
+      <p class="muted tiny" style="margin-top:5px">This is exactly what ReadySupport will submit. Nothing has happened yet.</p>
+    </div>
+
+    <div class="modal-body" style="padding-top:14px">
+      <div class="card" style="box-shadow:none">
+        <div class="card-body" style="padding:4px 14px">
+          ${confirmRow('Action', 'Create account')}
+          ${confirmRow('Agent', 'Marcus Smith')}
+          ${confirmRow('Email', 'marcus@example.com')}
+          ${confirmRow('Username', '<span class="mono">msmith3</span>')}
+          ${confirmRow('Role', 'Agent')}
+          ${confirmRow('License', 'Standard')}
+          ${confirmRow('Campaign', 'Vantage')}
+          ${confirmRow('Team', '<span class="dim">Not set</span>')}
+          ${confirmRow('Temporary password', 'Generated securely, sent only to you')}
+          <div class="row between gap-16" style="padding:9px 0">
+            <span class="muted" style="min-width:120px">Requested by</span>
+            <span class="strong grow" style="text-align:right">${esc(ME.name)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert brand" style="margin-top:14px">
+        ${icons.info}
+        <div>The password will appear in a reply only you can see. ReadySupport does not keep a copy — if it is lost, run the reset again.</div>
+      </div>
+    </div>
+
+    <div class="modal-foot split">
+      <button class="btn ghost" data-act="new-request">Edit request</button>
+      <div class="row gap-8">
+        <button class="btn" data-act="close-overlay">Cancel</button>
+        <button class="btn primary" data-act="run-request">${icons.check}Confirm and run</button>
+      </div>
+    </div>
+  </div>`;
+
+const newRequestMissing = () => h`
+  <div class="modal" role="dialog" aria-modal="true" aria-label="A little more information">
+    <div class="modal-head">
+      <h1 style="font-size:18px">Two things missing</h1>
+      <p class="muted tiny" style="margin-top:5px">
+        Everything else came through. ReadySupport will not guess a username or a license type, so it needs these two.
+      </p>
+    </div>
+
+    <div class="modal-body stack gap-14">
+      <div class="card" style="box-shadow:none;background:var(--surface-2)">
+        <div class="card-body" style="padding:11px 14px">
+          <div class="row wrap gap-16 tiny">
+            <span><span class="muted">Agent</span> <b>Marcus Smith</b></span>
+            <span><span class="muted">Email</span> <b>marcus@example.com</b></span>
+            <span><span class="muted">Role</span> <b>Agent</b></span>
+            <span><span class="muted">Campaign</span> <b>Vantage</b></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label" for="mfUser">Username</label>
+        <input class="input mono" id="mfUser" placeholder="msmith3" autofocus>
+        <span class="hint">What Marcus will sign in to Readymode with.</span>
+      </div>
+
+      <div class="field">
+        <label class="label" for="mfLic">License type</label>
+        <select class="select" id="mfLic">
+          <option value="">Choose one</option>
+          <option>Standard</option>
+          <option>Premium</option>
+        </select>
+        <span class="hint">Standard is what most agents on Vantage use.</span>
+      </div>
+    </div>
+
+    <div class="modal-foot split">
+      <button class="btn ghost" data-act="close-overlay">Cancel</button>
+      <button class="btn primary" data-act="confirm-step">Continue${icons.chevron}</button>
+    </div>
+  </div>`;
+
+const newRequestRunning = () => h`
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Running">
+    <div class="modal-body" style="padding:30px 26px">
+      <div class="stack gap-16">
+        <div class="row gap-10">
+          <span class="status-dot ring" style="background:var(--brand);box-shadow:0 0 0 3px var(--brand-tint);animation:pulse 1.4s ease-in-out infinite"></span>
+          <h1 style="font-size:18px">Creating the account in Readymode</h1>
+        </div>
+
+        <div class="timeline">
+          <div class="tl-item ok"><div class="strong">Signed in to Readymode</div><div class="t">Reused the existing session</div></div>
+          <div class="tl-item ok"><div class="strong">Checked the username and email are free</div><div class="t">Neither is taken</div></div>
+          <div class="tl-item brand"><div class="strong">Filling in the new agent form</div><div class="t">In progress…</div></div>
+          <div class="tl-item"><div class="dim">Confirming the account exists</div></div>
+          <div class="tl-item"><div class="dim">Capturing evidence</div></div>
+        </div>
+
+        <p class="tiny muted">This usually takes about 20 seconds. You can close this — the result will reach you either way, and it is recorded under ${rid(1049)}.</p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" disabled>${icons.clock}Running…</button>
+    </div>
+  </div>`;
+
+const newRequestDone = () => h`
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Done">
+    <div class="modal-body" style="padding:26px">
+      <div class="row gap-10" style="margin-bottom:16px">
+        <span class="status-dot ok ring"></span>
+        <h1 style="font-size:18px">Account created successfully.</h1>
+      </div>
+
+      <div class="card" style="box-shadow:none">
+        <div class="card-body" style="padding:4px 14px">
+          ${confirmRow('Agent', 'Marcus Smith')}
+          ${confirmRow('Username', '<span class="mono">msmith3</span>')}
+          ${confirmRow('Role', 'Agent')}
+          ${confirmRow('License', 'Standard')}
+          ${confirmRow('Campaign', 'Vantage')}
+          ${confirmRow('Completed at', '3:42 PM EST')}
+          <div class="row between gap-16" style="padding:9px 0">
+            <span class="muted" style="min-width:120px">Request</span>
+            <span class="grow" style="text-align:right">${rid(1049)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert ok" style="margin-top:14px">
+        ${icons.lock}
+        <div>
+          <b>Temporary password</b>
+          <div class="mono" style="margin-top:5px;font-size:14px;letter-spacing:.02em">tK7#vQm2Rw9pLxZ4</div>
+          <div class="tiny" style="margin-top:6px;opacity:.85">Only you can see this. Give it to Marcus privately and have him change it at first sign-in — ReadySupport does not keep a copy.</div>
+        </div>
+      </div>
+
+      <p class="tiny muted" style="margin-top:12px">ReadySupport re-checked the agent list and confirmed the account is there. A screenshot is attached to the record.</p>
+    </div>
+    <div class="modal-foot split">
+      <button class="btn ghost" data-act="open-request" data-id="1048">View full record</button>
+      <button class="btn primary" data-act="close-overlay">Done</button>
+    </div>
+  </div>`;
+
+/* --- Request detail panel ------------------------------------------------ */
+
+/* The original wording, per action — a record of what the person actually
+   said, next to what ReadySupport made of it. */
+const ASKED = {
+  'Create account':      'Create a Readymode account for Marcus Smith and assign him to the Vantage campaign.',
+  'Clear license':       'Clear the license from Marcus Smith.',
+  'Reset password':      "Reset Sarah's password please.",
+  'Deactivate account':  'Dana Lee has left — deactivate her account.',
+  'Check license usage': 'Which agents are currently using licenses?',
+  'Check agent status':  'Is Sarah Garcia signed in right now?',
+};
+
+/* The extracted fields differ by action, so a clear-license record does not
+   show an email address and a role it never had. */
+const understoodRows = (r) => {
+  const first = r.target.split(' (')[0];
+  switch (r.action) {
+    case 'Create account':
+      return [
+        ['Action', 'Create account'],
+        ['Agent', esc(first)],
+        ['Username', '<span class="mono">msmith3</span>'],
+        ['Email', 'marcus@example.com'],
+        ['Role', 'Agent'],
+        ['License', 'Standard'],
+        ['Campaign', 'Vantage'],
+      ];
+    case 'Clear license':
+      return [
+        ['Action', 'Clear license'],
+        ['Agent', esc(first)],
+        ['Matched by', 'Full name'],
+        ['License held', 'Standard'],
+        ['On a call', 'No'],
+      ];
+    case 'Reset password':
+      return [
+        ['Action', 'Reset password'],
+        ['Agent', esc(first)],
+        ['Username', '<span class="mono">sgarcia</span>'],
+        ['New password', 'Generated securely'],
+        ['Delivered to', esc(r.by) + ' only'],
+      ];
+    case 'Deactivate account':
+      return [
+        ['Action', 'Deactivate account'],
+        ['Agent', esc(first)],
+        ['Username', '<span class="mono">dlee</span>'],
+        ['Reason', 'Left the company'],
+        ['License', 'Will be released'],
+      ];
+    default:
+      return [
+        ['Action', esc(r.action)],
+        ['Scope', esc(r.target)],
+        ['Changes anything', 'No — read only'],
+      ];
+  }
+};
+
+const requestPanel = (id) => {
+  const r = REQUESTS.find((x) => x.id === id) ?? REQUESTS[0];
+  const failed = r.status === 'failed';
+  const waiting = r.status === 'approval';
+  const running = r.status === 'running';
+
+  return h`
+    <div class="panel-scrim" data-act="close-overlay"></div>
+    <aside class="panel" role="dialog" aria-modal="true" aria-label="Request ${r.id}">
+      <div class="panel-head">
+        <div class="row between gap-12">
+          <div class="row gap-9">${rid(r.id)}${pill(r.status)}</div>
+          <button class="btn icon sm ghost" data-act="close-overlay" aria-label="Close">${icons.x}</button>
+        </div>
+        <div class="row gap-9" style="margin-top:11px">
+          ${kindDot(r.kind)}
+          <h1 style="font-size:17px">${esc(r.action)}</h1>
+        </div>
+        <p class="muted tiny" style="margin-top:4px">
+          ${esc(r.target)} · asked by ${esc(r.by)} in ${r.via} · ${esc(r.created)}
+        </p>
+      </div>
+
+      <div class="panel-body stack gap-18">
+        ${failed ? h`
+          <div class="alert danger">
+            ${icons.alert}
+            <div>
+              <b>I stopped without changing anything.</b>
+              Two accounts are named Marcus Smith, so ReadySupport would have had to guess which one you meant.
+              Pick the right one and it will pick up where it left off.
+              <div class="row gap-8 wrap" style="margin-top:10px">
+                <button class="btn sm" data-act="close-overlay">Marcus Smith · msmith · Team B</button>
+                <button class="btn sm" data-act="close-overlay">Marcus Smith · msmith2 · Team C</button>
+              </div>
+            </div>
+          </div>` : ''}
+
+        ${waiting ? h`
+          <div class="alert warn">
+            ${icons.alert}
+            <div>
+              <b>This needs a second pair of eyes.</b>
+              Rosa asked for it, so someone else with owner or admin access has to confirm. Expires in 6 minutes.
+              <div class="row gap-8" style="margin-top:10px">
+                <button class="btn sm danger" data-act="approve-deactivate">Confirm deactivation</button>
+                <button class="btn sm" data-act="close-overlay">Decline</button>
+              </div>
+            </div>
+          </div>` : ''}
+
+        ${running ? h`
+          <div class="alert brand">
+            ${icons.clock}
+            <div><b>Running now.</b> ReadySupport has opened the agent and is releasing the license. Roughly 10 seconds left.</div>
+          </div>` : ''}
+
+        ${r.via === 'Discord' ? h`
+          <div class="stack gap-7">
+            <span class="eyebrow">What was asked</span>
+            <div class="card" style="box-shadow:none;background:var(--surface-2)">
+              <div class="card-body" style="padding:12px 14px">
+                <p style="font-style:italic;color:var(--ink-2)">“${esc(ASKED[r.action] ?? r.action)}”</p>
+                <p class="tiny dim" style="margin-top:7px">Sent in #readysupport-requests</p>
+              </div>
+            </div>
+          </div>` : ''}
+
+        <div class="stack gap-7">
+          <span class="eyebrow">What ReadySupport understood</span>
+          <div class="card" style="box-shadow:none">
+            <div class="card-body" style="padding:4px 14px">
+              ${understoodRows(r).map(([k, v], i, all) => i === all.length - 1
+                ? `<div class="row between gap-16" style="padding:9px 0"><span class="muted" style="min-width:120px">${esc(k)}</span><span class="strong grow" style="text-align:right">${v}</span></div>`
+                : confirmRow(k, v)).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="stack gap-7">
+          <span class="eyebrow">Approval</span>
+          <dl class="defs">
+            <dt>Requested by</dt><dd>${esc(r.by)}</dd>
+            <dt>Confirmed by</dt><dd>${waiting ? '<span class="dim">Waiting</span>' : 'Rosa Delgado <span class="tiny dim">· Admin</span>'}</dd>
+            <dt>Second approver</dt><dd>${r.kind === 'destroy' ? 'Required' : '<span class="dim">Not required for this action</span>'}</dd>
+          </dl>
+        </div>
+
+        <div class="stack gap-9">
+          <span class="eyebrow">What happened</span>
+          <div class="timeline">
+            <div class="tl-item ok"><div class="strong">Request created</div><div class="t">${esc(r.created)} · ${esc(r.by)}</div></div>
+            <div class="tl-item ok"><div class="strong">Confirmed</div><div class="t">${waiting ? 'Waiting for a second approver' : 'Today 3:41 PM'}</div></div>
+            <div class="tl-item ${failed ? 'danger' : running ? 'brand' : 'ok'}">
+              <div class="strong">${failed ? 'Stopped before making a change' : running ? 'Running now' : 'Ran in Readymode'}</div>
+              <div class="t">${failed ? 'Two accounts matched the name' : running ? 'Started 12 seconds ago' : 'Took 11 seconds'}</div>
+            </div>
+            ${!failed && !running && !waiting ? h`
+              <div class="tl-item ok"><div class="strong">Change verified</div><div class="t">Re-read the agent list and confirmed it</div></div>
+              <div class="tl-item ok"><div class="strong">Password delivered privately</div><div class="t">To ${esc(r.by)} only · no copy kept</div></div>` : ''}
+          </div>
+        </div>
+
+        ${!failed && !running && !waiting ? h`
+          <div class="stack gap-7">
+            <span class="eyebrow">Verification</span>
+            <div class="alert ok">
+              ${icons.check}
+              <div>ReadySupport re-opened the agent list after the change and found the account. This is a separate check, not just Readymode saying it worked.</div>
+            </div>
+          </div>` : ''}
+
+        <div class="stack gap-7">
+          <span class="eyebrow">Evidence</span>
+          <div class="shot">
+            <div class="frame">
+              ${icons.image}
+              <span>Screenshot taken after the change was verified</span>
+            </div>
+            <div class="cap row between">
+              <span class="muted">${failed ? 'search-results.png' : 'after-create-account.png'}</span>
+              <button class="btn ghost sm" data-act="noop">${icons.external}Open</button>
+            </div>
+          </div>
+          <p class="tiny dim">Password fields are emptied before any screenshot, so a captured image never shows one.</p>
+        </div>
+      </div>
+
+      <div class="panel-foot row between gap-10">
+        <span class="tiny dim">Recorded permanently as ${rid(r.id, true)}</span>
+        <div class="row gap-8">
+          ${failed
+            ? `<button class="btn" data-act="noop" title="Retrying is safe here: nothing was changed">${icons.refresh}Try again</button>`
+            : running
+              ? `<button class="btn" disabled>${icons.clock}Running…</button>`
+              : `<button class="btn" disabled title="This one changed an account, so it is not safe to repeat automatically">${icons.refresh}Cannot retry</button>`}
+          <button class="btn" data-act="close-overlay">Close</button>
+        </div>
+      </div>
+    </aside>`;
+};
+
+/* --- Confirmation modals -------------------------------------------------- */
+const confirmModals = {
+  clear: (a) => ({
+    kind: 'write',
+    title: `Clear ${a.name}'s license?`,
+    lead: a.onCall
+      ? `${a.name.split(' ')[0]} is on a call right now. Clearing the license will drop that call.`
+      : `This frees the seat immediately. ${a.name.split(' ')[0]} will be signed out of Readymode.`,
+    tone: a.onCall ? 'warn' : '',
+    rows: [
+      ['Agent', esc(a.name)],
+      ['Username', `<span class="mono">${esc(a.user)}</span>`],
+      ['License', esc(a.license)],
+      ['Signed in for', esc(a.connected)],
+      ['Currently', esc(a.presence)],
+    ],
+    danger: false,
+    cta: 'Clear license',
+    typed: false,
+  }),
+  reset: (a) => ({
+    kind: 'write',
+    title: `Reset ${a.name}'s password?`,
+    lead: 'ReadySupport will set a new temporary password and show it to you once, privately.',
+    tone: '',
+    rows: [
+      ['Agent', esc(a.name)],
+      ['Username', `<span class="mono">${esc(a.user)}</span>`],
+      ['New password', 'Generated securely'],
+      ['Delivered to', esc(ME.name) + ' only'],
+    ],
+    danger: false,
+    cta: 'Reset password',
+    typed: false,
+  }),
+  deactivate: (a) => ({
+    kind: 'destroy',
+    title: `Deactivate ${a.name}?`,
+    lead: `${a.name.split(' ')[0]} will lose access to Readymode immediately and their license will be released. This is the hardest action to undo.`,
+    tone: 'danger',
+    rows: [
+      ['Agent', esc(a.name)],
+      ['Username', `<span class="mono">${esc(a.user)}</span>`],
+      ['Team', esc(a.team)],
+      ['Campaign', esc(a.campaign)],
+      ['License', a.licenseInUse ? `${esc(a.license)} — will be released` : 'Not in use'],
+    ],
+    danger: true,
+    cta: 'Request deactivation',
+    typed: true,
+  }),
+};
+
+const confirmModal = (kind, agentId) => {
+  const a = AGENTS.find((x) => x.id === agentId) ?? AGENTS[0];
+  const c = confirmModals[kind](a);
+
+  return h`
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(c.title)}">
+      <div class="modal-head">
+        <div class="row gap-9" style="margin-bottom:3px">
+          ${kindDot(c.kind)}
+          <span class="eyebrow">${c.kind === 'destroy' ? 'Removes access' : 'Changes an account'}</span>
+        </div>
+        <h1 style="font-size:18px">${esc(c.title)}</h1>
+        <p class="muted tiny" style="margin-top:5px">${esc(c.lead)}</p>
+      </div>
+
+      <div class="modal-body" style="padding-top:14px">
+        ${c.tone === 'warn' ? h`
+          <div class="alert warn" style="margin-bottom:14px">
+            ${icons.alert}
+            <div>A customer is on the other end of that call. Only continue if you mean to drop it.</div>
+          </div>` : ''}
+
+        ${c.danger ? h`
+          <div class="alert danger" style="margin-bottom:14px">
+            ${icons.alert}
+            <div>Deactivation needs a second owner or admin to confirm. Nothing happens until someone else signs off.</div>
+          </div>` : ''}
+
+        <div class="card" style="box-shadow:none">
+          <div class="card-body" style="padding:4px 14px">
+            ${c.rows.map(([k, v], i) => i === c.rows.length - 1
+              ? `<div class="row between gap-16" style="padding:9px 0"><span class="muted" style="min-width:120px">${k}</span><span class="strong grow" style="text-align:right">${v}</span></div>`
+              : confirmRow(k, v)).join('')}
+          </div>
+        </div>
+
+        ${c.typed ? h`
+          <div class="field" style="margin-top:14px">
+            <label class="label" for="typed">Type <b class="mono">${esc(a.user)}</b> to continue</label>
+            <input class="input mono" id="typed" placeholder="${esc(a.user)}" autocomplete="off">
+            <span class="hint">A deliberate step, so this cannot happen by a stray click.</span>
+          </div>` : ''}
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn" data-act="close-overlay">Cancel</button>
+        <button class="btn ${c.danger ? 'danger' : 'primary'}" data-act="run-confirm"
+                ${c.typed ? 'disabled id="confirmBtn"' : ''}>${esc(c.cta)}</button>
+      </div>
+    </div>`;
+};
+
+const clearInactiveModal = () => {
+  const idle = AGENTS.filter((a) => a.licenseInUse && a.presence === 'Idle');
+  return h`
+    <div class="modal wide" role="dialog" aria-modal="true" aria-label="Clear inactive licenses">
+      <div class="modal-head">
+        <div class="row gap-9" style="margin-bottom:3px">${kindDot('write')}<span class="eyebrow">Changes ${idle.length} accounts</span></div>
+        <h1 style="font-size:18px">Clear ${idle.length} inactive licenses?</h1>
+        <p class="muted tiny" style="margin-top:5px">
+          These agents have held a seat for more than 30 minutes without activity. Clearing signs them out of Readymode.
+        </p>
+      </div>
+
+      <div class="modal-body">
+        <div class="alert warn" style="margin-bottom:14px">
+          ${icons.alert}
+          <div>Because this affects more than one account, a second owner or admin has to confirm it before it runs.</div>
+        </div>
+
+        <div class="card" style="box-shadow:none;overflow:hidden">
+          <table class="tbl">
+            <thead><tr><th>Agent</th><th>Idle for</th><th>Signed in</th></tr></thead>
+            <tbody>
+              ${idle.map((a) => h`
+                <tr>
+                  <td>${person(a.name, a.user)}</td>
+                  <td class="nums muted">${esc(a.last)}</td>
+                  <td class="nums muted">${esc(a.connected)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <p class="tiny dim" style="margin-top:11px">Nobody who is on a call or actively working is in this list.</p>
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn" data-act="close-overlay">Cancel</button>
+        <button class="btn primary" data-act="run-confirm">Request approval to clear ${idle.length}</button>
+      </div>
+    </div>`;
+};
+
+const inviteModal = () => h`
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Invite someone">
+    <div class="modal-head">
+      <h1 style="font-size:18px">Invite someone to ReadySupport</h1>
+      <p class="muted tiny" style="margin-top:5px">They sign in with Discord — there is no password to send.</p>
+    </div>
+    <div class="modal-body stack gap-14">
+      <div class="field">
+        <label class="label" for="invName">Discord username</label>
+        <input class="input mono" id="invName" placeholder="rosa.d">
+      </div>
+      <div class="field">
+        <label class="label" for="invRole">Role</label>
+        <select class="select" id="invRole">
+          ${Object.keys(ROLE_POWERS).map((r) => `<option ${r === 'Support' ? 'selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div class="alert brand">
+        ${icons.info}
+        <div><b>Support</b> — ${esc(ROLE_POWERS.Support)}</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-act="close-overlay">Cancel</button>
+      <button class="btn primary" data-act="run-confirm">Send invite</button>
+    </div>
+  </div>`;
+
+/* --- Readymode login required -------------------------------------------- */
+const loginRequiredModal = () => h`
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Readymode sign-in required">
+    <div class="modal-head">
+      <div class="row gap-10" style="margin-bottom:8px">
+        <span class="status-dot danger ring"></span>
+        <span class="eyebrow" style="color:var(--danger)">Readymode sign-in required</span>
+      </div>
+      <h1 style="font-size:18px">ReadySupport has lost access to Readymode</h1>
+      <p class="muted tiny" style="margin-top:6px">
+        The session ended at 2:14 PM. Two requests are waiting and will run automatically once access is back —
+        nobody needs to submit them again.
+      </p>
+    </div>
+
+    <div class="modal-body stack gap-14">
+      <div class="stack gap-8">
+        <span class="eyebrow">Waiting</span>
+        <div class="card" style="box-shadow:none">
+          <div class="list">
+            <div class="list-row">${kindDot('write')}<span class="strong grow">Clear license · John Brown</span>${rid(1047)}</div>
+            <div class="list-row">${kindDot('destroy')}<span class="strong grow">Deactivate account · Dana Lee</span>${rid(1046)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert">
+        ${icons.info}
+        <div>
+          Most of the time this fixes itself: ReadySupport signs back in with the stored admin credentials.
+          If Readymode asks for a code or a security check, someone has to sign in by hand — ReadySupport will not
+          work around a security control.
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-foot split">
+      <button class="btn ghost" data-act="close-overlay">Later</button>
+      <div class="row gap-8">
+        <button class="btn" data-act="goto" data-page="connections">Connection details</button>
+        <button class="btn primary" data-act="reconnect">${icons.refresh}Reconnect now</button>
+      </div>
+    </div>
+  </div>`;
+
+/* --- Menus and toasts ---------------------------------------------------- */
+let openMenu = null;
+
+function showMenu(anchor, items) {
+  closeMenu();
+  const el = document.createElement('div');
+  el.className = 'menu';
+  el.innerHTML = items.map((it) => it === '-'
+    ? '<hr>'
+    : `<button data-act="${it.act}" ${it.id ? `data-id="${it.id}"` : ''} ${it.kind ? `data-kind="${it.kind}"` : ''} class="${it.danger ? 'danger' : ''}">${icons[it.icon] ?? ''}${esc(it.label)}</button>`).join('');
+  document.body.appendChild(el);
+
+  const r = anchor.getBoundingClientRect();
+  const w = el.offsetWidth;
+  el.style.top = `${Math.min(r.bottom + 6, window.innerHeight - el.offsetHeight - 10)}px`;
+  el.style.left = `${Math.max(10, Math.min(r.right - w, window.innerWidth - w - 10))}px`;
+  openMenu = el;
+}
+
+function closeMenu() {
+  openMenu?.remove();
+  openMenu = null;
+}
+
+function toast(message, ok = true) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span class="${ok ? 'ok' : ''}" style="width:15px;height:15px;display:block">${ok ? icons.check : icons.alert}</span><span>${esc(message)}</span>`;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3600);
+}
+
+/* --- Overlay plumbing ---------------------------------------------------- */
+let overlay = null;
+
+function openOverlay(html, opts = {}) {
+  overlay = opts.name ?? 'overlay';
+  $('#overlays').innerHTML = html.trim().startsWith('<div class="panel-scrim"')
+    ? html
+    : `<div class="scrim ${opts.center ? 'center' : ''}" data-scrim>${html}</div>`;
+  document.body.style.overflow = 'hidden';
+  const focusable = $('#overlays').querySelector('input, textarea, button.primary');
+  focusable?.focus?.();
+}
+
+function closeOverlay() {
+  overlay = null;
+  $('#overlays').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+/* --- Render -------------------------------------------------------------- */
+const PAGES = {
+  overview: pageOverview,
+  requests: pageRequests,
+  agents: () => (state.agentId ? pageAgentDetail() : pageAgents()),
+  licenses: pageLicenses,
+  activity: pageActivity,
+  connections: pageConnections,
+  team: pageTeam,
+  settings: pageSettings,
+};
+
+function render() {
+  const root = $('#root');
+
+  if (!state.signedIn) {
+    root.innerHTML = signIn();
+    return;
+  }
+
+  root.innerHTML = h`
+    <div class="app">
+      ${sidebar()}
+      ${state.drawer ? '<div class="drawer-scrim" data-act="drawer"></div>' : ''}
+      <div class="main">
+        ${topbar()}
+        ${!CONNECTED() && state.page !== 'connections' ? h`
+          <div style="padding:14px 24px 0">
+            <div class="alert danger" style="align-items:center">
+              ${icons.alert}
+              <div class="grow"><b>ReadySupport cannot reach Readymode.</b> Queued changes are on hold. Nothing has been lost.</div>
+              <button class="btn sm" data-act="login-required">Fix this</button>
+            </div>
+          </div>` : ''}
+        <main class="content">${PAGES[state.page]()}</main>
+      </div>
+    </div>`;
+
+  const demoSelect = $('#demoState');
+  if (demoSelect) demoSelect.value = state.demo;
+}
+
+/* --- Events -------------------------------------------------------------- */
+document.addEventListener('click', (e) => {
+  const menuBtn = e.target.closest('.menu button');
+  const trigger = e.target.closest('[data-act]');
+
+  if (!trigger && openMenu && !e.target.closest('.menu')) closeMenu();
+
+  if (e.target.closest('[data-scrim]') && !e.target.closest('.modal')) {
+    closeOverlay();
+    return;
+  }
+
+  if (!trigger) return;
+
+  const act = trigger.dataset.act;
+  const id = trigger.dataset.id;
+  const kind = trigger.dataset.kind;
+
+  if (menuBtn) closeMenu();
+
+  switch (act) {
+    case 'do-signin':
+      state.signedIn = true;
+      render();
+      toast('Signed in as Kaeden Vaughns');
+      break;
+
+    case 'signout':
+      state.signedIn = false;
+      state.drawer = false;
+      closeOverlay();
+      render();
+      break;
+
+    case 'goto':
+      state.page = trigger.dataset.page;
+      state.agentId = null;
+      state.drawer = false;
+      closeOverlay();
+      render();
+      window.scrollTo({ top: 0 });
+      break;
+
+    case 'drawer':
+      state.drawer = !state.drawer;
+      render();
+      break;
+
+    case 'new-request':
+      openOverlay(newRequestStep1(), { name: 'new' });
+      break;
+
+    case 'fill-example': {
+      const input = $('#reqInput');
+      if (input) { input.value = EXAMPLE; input.focus(); }
+      break;
+    }
+
+    case 'interpret': {
+      const value = ($('#reqInput')?.value ?? '').trim();
+      const btn = $('#interpretBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Reading that…'; }
+      // A short pause so the interpreting step is visible rather than a jump.
+      setTimeout(() => {
+        // The example names a campaign but no username or license type, so it
+        // takes the missing-information path — the honest outcome.
+        openOverlay(value && !/username/i.test(value) ? newRequestMissing() : newRequestConfirm(), { name: 'confirm' });
+      }, 420);
+      break;
+    }
+
+    case 'quick':
+      if (kind === 'create') { openOverlay(newRequestMissing(), { name: 'missing' }); break; }
+      if (kind === 'usage' || kind === 'status') {
+        closeOverlay();
+        state.page = kind === 'usage' ? 'licenses' : 'agents';
+        state.agentId = null;
+        render();
+        toast(kind === 'usage' ? 'Checked license usage' : 'Pick an agent to look up');
+        break;
+      }
+      openOverlay(confirmModal(kind === 'clear' ? 'clear' : kind === 'reset' ? 'reset' : 'deactivate', '1001'), { name: 'confirm' });
+      break;
+
+    case 'confirm-step':
+      openOverlay(newRequestConfirm(), { name: 'confirm' });
+      break;
+
+    case 'run-request':
+      openOverlay(newRequestRunning(), { name: 'running' });
+      setTimeout(() => openOverlay(newRequestDone(), { name: 'done' }), 2100);
+      break;
+
+    case 'confirm-action':
+      closeMenu();
+      openOverlay(confirmModal(kind, id), { name: 'confirm', center: true });
+      break;
+
+    case 'run-confirm': {
+      const btn = trigger;
+      btn.disabled = true;
+      btn.textContent = 'Working…';
+      setTimeout(() => {
+        closeOverlay();
+        toast('Request submitted — you will see the result here and in Discord');
+      }, 900);
+      break;
+    }
+
+    case 'approve-deactivate':
+      closeOverlay();
+      toast('Deactivation approved and queued as RS-1046');
+      break;
+
+    case 'clear-inactive':
+      openOverlay(clearInactiveModal(), { name: 'bulk' });
+      break;
+
+    case 'invite':
+      openOverlay(inviteModal(), { name: 'invite', center: true });
+      break;
+
+    case 'login-required':
+      openOverlay(loginRequiredModal(), { name: 'login', center: true });
+      break;
+
+    case 'reconnect': {
+      const btn = trigger;
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+      setTimeout(() => {
+        state.demo = 'normal';
+        closeOverlay();
+        render();
+        toast('Signed back in — 2 waiting requests have resumed');
+      }, 1200);
+      break;
+    }
+
+    case 'test-connection': {
+      const btn = trigger;
+      btn.disabled = true;
+      btn.textContent = 'Checking…';
+      setTimeout(() => { render(); toast('Readymode responded in 0.9 seconds'); }, 900);
+      break;
+    }
+
+    case 'open-request':
+      closeOverlay();
+      openOverlay(requestPanel(Number(id)), { name: 'request' });
+      break;
+
+    case 'open-agent':
+      state.page = 'agents';
+      state.agentId = id;
+      render();
+      window.scrollTo({ top: 0 });
+      break;
+
+    case 'row-menu':
+      e.stopPropagation();
+      showMenu(trigger, [
+        { act: 'open-request', id, icon: 'external', label: 'Open request' },
+        { act: 'noop', icon: 'file', label: 'Copy request ID' },
+        '-',
+        { act: 'noop', icon: 'image', label: 'View evidence' },
+      ]);
+      break;
+
+    case 'agent-menu':
+      e.stopPropagation();
+      showMenu(trigger, [
+        { act: 'open-agent', id, icon: 'user', label: 'View agent' },
+        { act: 'noop', icon: 'external', label: 'Open in Readymode' },
+        '-',
+        { act: 'confirm-action', kind: 'clear', id, icon: 'key', label: 'Clear license' },
+        { act: 'confirm-action', kind: 'reset', id, icon: 'lock', label: 'Reset password' },
+        '-',
+        { act: 'confirm-action', kind: 'deactivate', id, icon: 'trash', label: 'Deactivate account', danger: true },
+      ]);
+      break;
+
+    case 'team-menu':
+      e.stopPropagation();
+      showMenu(trigger, [
+        { act: 'noop', icon: 'user', label: 'Change role' },
+        { act: 'noop', icon: 'bell', label: 'Alert preferences' },
+        '-',
+        { act: 'noop', icon: 'trash', label: 'Remove access', danger: true },
+      ]);
+      break;
+
+    case 'settings-section':
+      settingsSection = trigger.dataset.key;
+      render();
+      break;
+
+    case 'save-settings':
+      trigger.disabled = true;
+      trigger.textContent = 'Saving…';
+      setTimeout(() => { render(); toast('Settings saved'); }, 700);
+      break;
+
+    case 'clear-filters':
+      state.filters = { status: 'all', action: 'all', by: 'all', q: '' };
+      render();
+      break;
+
+    case 'retry-load':
+      state.demo = 'normal';
+      render();
+      break;
+
+    case 'toggle': {
+      const on = trigger.getAttribute('aria-checked') === 'true';
+      trigger.setAttribute('aria-checked', String(!on));
+      break;
+    }
+
+    case 'close-overlay':
+      closeOverlay();
+      break;
+
+    case 'noop':
+      break;
+  }
+});
+
+/* Typed confirmation for deactivation. */
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'typed') {
+    const btn = $('#confirmBtn');
+    if (btn) btn.disabled = e.target.value.trim().length < 3;
+  }
+  if (e.target.id === 'reqSearch') { state.filters.q = e.target.value; renderKeepingFocus('reqSearch'); }
+  if (e.target.id === 'agentSearch') { state.agentQuery = e.target.value; renderKeepingFocus('agentSearch'); }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'demoState') { state.demo = e.target.value; closeOverlay(); render(); return; }
+  if (e.target.id === 'fStatus')  { state.filters.status = e.target.value; render(); }
+  if (e.target.id === 'fAction')  { state.filters.action = e.target.value; render(); }
+  if (e.target.id === 'fBy')      { state.filters.by = e.target.value; render(); }
+});
+
+/* Re-render without losing the caret in a search field. */
+function renderKeepingFocus(inputId) {
+  const before = document.getElementById(inputId);
+  const pos = before?.selectionStart ?? 0;
+  render();
+  const after = document.getElementById(inputId);
+  if (after) { after.focus(); after.setSelectionRange(pos, pos); }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (openMenu) { closeMenu(); return; }
+    if (overlay) { closeOverlay(); return; }
+    if (state.drawer) { state.drawer = false; render(); }
+  }
+  // The fastest path to the thing this product exists for.
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.signedIn) {
+    e.preventDefault();
+    openOverlay(newRequestStep1(), { name: 'new' });
+  }
+});
+
+window.addEventListener('resize', () => { if (window.innerWidth > 860 && state.drawer) { state.drawer = false; render(); } });
+
+render();
+
+</script>
