@@ -1,0 +1,15 @@
+node_modules
+dist
+coverage
+discovery
+evidence
+.git
+.github
+.env
+.env.*
+!.env.example
+tests
+docs
+supabase
+*.log
+.DS_Store
