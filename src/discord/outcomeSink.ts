@@ -1,5 +1,7 @@
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
@@ -297,6 +299,17 @@ export class DiscordOutcomeSink implements OutcomeSink {
       }
     }
 
+    // Readymode wanted fields ReadySupport treats as optional. Offer a form
+    // rather than making somebody retype the whole command.
+    const missingFields = readMissingFields(error.details);
+    if (missingFields.length > 0) {
+      await this.send(pending, {
+        embeds: [embed],
+        components: [buildProvideDetailsRow(request.id, missingFields)],
+      });
+      return;
+    }
+
     if (error.category === 'AUTH_EXPIRED' || error.category === 'VERIFICATION_REQUIRED') {
       await this.send(pending, {
         embeds: [embed],
@@ -373,6 +386,35 @@ export class DiscordOutcomeSink implements OutcomeSink {
       log.error({ err: cause, channelId }, 'Could not post the outcome to the channel either');
     }
   }
+}
+
+/** The optional fields a failure asked for, if it asked for any. */
+export function readMissingFields(details: Record<string, unknown>): string[] {
+  const raw = details['missingFields'];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((field): field is string => typeof field === 'string').slice(0, 5);
+}
+
+/**
+ * The button that opens the fill-in-the-rest form.
+ *
+ * The field names ride in the nonce slot. Nothing is being authenticated here —
+ * this button grants no authority, and the handler re-checks that the clicker
+ * owns the request — so the slot carries the payload instead, which means the
+ * form matches the failure it came from even if a different process serves the
+ * click. Field names are short and colon-free, and encodeComponentId throws if
+ * the result would exceed what Discord accepts.
+ */
+export function buildProvideDetailsRow(
+  requestId: string,
+  fields: string[],
+): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(encodeComponentId({ kind: 'provide_info', requestId, nonce: fields.join('-') }))
+      .setLabel('Add the missing details')
+      .setStyle(ButtonStyle.Primary),
+  );
 }
 
 async function editOrFollowUp(

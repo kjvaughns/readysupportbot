@@ -13,7 +13,7 @@ import { toReadySupportError } from '../domain/errors.js';
 import * as audit from '../audit/audit.js';
 import * as notifier from '../notify/notifier.js';
 import { findCommand } from './commands/index.js';
-import { handleAccountChoice, handleButton } from './interactions.js';
+import { handleAccountChoice, handleButton, handleModalSubmit } from './interactions.js';
 import { handleMessage } from './nlChannel.js';
 import { moduleLogger } from '../util/logger.js';
 
@@ -79,6 +79,10 @@ async function route(interaction: Interaction): Promise<void> {
   }
   if (interaction.isStringSelectMenu()) {
     await handleAccountChoice(interaction);
+    return;
+  }
+  if (interaction.isModalSubmit()) {
+    await handleModalSubmit(interaction);
     return;
   }
 }

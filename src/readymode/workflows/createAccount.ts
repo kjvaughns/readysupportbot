@@ -42,6 +42,21 @@ export const CREATE_ACCOUNT_SELECTORS = [
 export const CREATE_ACCOUNT_ROUTES = ['route.agents', 'route.agentCreate'] as const;
 
 /**
+ * Fields that are optional to ReadySupport but which a given Readymode
+ * instance may insist on. When the form is rejected, these are what gets
+ * offered back to the requester as a form to fill in.
+ */
+export const OPTIONAL_FIELDS = [
+  { key: 'team', selectorId: 'create.team.select', label: 'Team' },
+  { key: 'campaign', selectorId: 'create.campaign.select', label: 'Campaign' },
+  { key: 'queue', selectorId: 'create.queue.select', label: 'Queue' },
+] as const satisfies ReadonlyArray<{
+  key: 'team' | 'campaign' | 'queue';
+  selectorId: string;
+  label: string;
+}>;
+
+/**
  * Refuse if the email or username is already taken.
  *
  * Done as two separate searches rather than one, because Readymode's search
@@ -184,10 +199,24 @@ export async function createAccount(
       // Readymode rejecting the form is a clean stop, not a failure to
       // investigate. Whatever it said is not repeated verbatim — a validation
       // banner is untrusted text.
+      //
+      // The banner does not say *which* field it objected to, and guessing
+      // would be no better than the guessing this codebase avoids elsewhere.
+      // What can be said honestly is which optional fields this instance has a
+      // control for and the requester did not fill in. Those are offered back
+      // as a form, so the usual case — an instance where team or campaign is
+      // mandatory — is one reply away rather than a support conversation.
       if (await isVisibleIfConfigured(page, 'create.validationError.marker', 2_000)) {
+        const offerable = OPTIONAL_FIELDS.filter(
+          (field) => action[field.key] === undefined && getSelector(field.selectorId).value !== UNKNOWN,
+        ).map((field) => field.key);
+
         throw errorFor('PRECONDITION_FAILED', {
-          message:
-            'Readymode rejected the new account details. Check the username, email and role against what it expects.',
+          message: offerable.length
+            ? 'Readymode would not accept the account with the details given. It may require ' +
+              `${offerable.join(', ')} as well — give me those and I will try again.`
+            : 'Readymode rejected the new account details. Check the username, email and role against what it expects.',
+          details: { missingFields: offerable },
         });
       }
 
