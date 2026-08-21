@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { env } from '../../config';
 import { requireAccess, requireRole } from '../../auth';
 import { getClient, isDiscordConfigured } from '../../discord/client';
+import { registerCommands } from '../../discord/registerCommands';
+import { COMMAND_NAMES } from '../../discord/commands';
 import { getStore } from '../../database';
 import { recordEvent } from '../../audit';
 import { ACTION_TYPES, roleSchema } from '../../types';
@@ -90,6 +92,48 @@ export async function discordRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return { installation };
+  });
+
+  /**
+   * Publishes the slash commands to Discord.
+   *
+   * This is the same work as `npm run register:commands`, exposed so it can be
+   * done without shell access to the deployment. Registering is idempotent —
+   * it replaces the published set with the current one — so re-running it after
+   * every deploy is safe and is the simplest way to stay in step.
+   *
+   * A guildId registers to one server and appears immediately; without one the
+   * commands register globally and can take up to an hour to propagate.
+   */
+  app.post('/discord/register-commands', async (request) => {
+    const context = await requireRole(request, ['owner', 'administrator']);
+    const body = z.object({ guildId: snowflake.optional() }).parse(request.body ?? {});
+
+    if (!isDiscordConfigured()) throw new DependencyNotConfiguredError('Discord');
+
+    // Default to the installed guild, so commands show up straight away rather
+    // than waiting on global propagation.
+    const installation = await getStore().getInstallation(context.organizationId);
+    const guildId = body.guildId ?? installation?.guildId;
+
+    const count = await registerCommands(guildId);
+
+    await recordEvent({
+      organizationId: context.organizationId,
+      type: 'connection.updated',
+      message: `${count} slash command(s) registered${guildId ? ' for the connected server' : ' globally'}.`,
+      data: { guildId: guildId ?? null, commands: COMMAND_NAMES },
+    });
+
+    return {
+      registered: count,
+      scope: guildId ? 'guild' : 'global',
+      guildId: guildId ?? null,
+      commands: COMMAND_NAMES,
+      message: guildId
+        ? `${count} commands registered for the connected server. They are available immediately.`
+        : `${count} commands registered globally. Discord can take up to an hour to show them everywhere.`,
+    };
   });
 
   /** Channels ReadySupport is approved to work in. */

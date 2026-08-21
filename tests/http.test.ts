@@ -126,3 +126,24 @@ describe('API surface', () => {
     expect(refused.headers['access-control-allow-origin']).toBeUndefined();
   });
 });
+
+describe('slash command registration endpoint', () => {
+  it('requires authentication', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/discord/register-commands',
+      payload: { organizationId: 'org-a' },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('is exposed so registration needs no shell access', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/discord/register-commands',
+      payload: { organizationId: 'org-a' },
+    });
+    // 401 rather than 404 proves the route exists and is gated.
+    expect(response.json().error).toBe('unauthenticated');
+  });
+});

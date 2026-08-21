@@ -95,6 +95,26 @@ Discord roles map onto these four ReadySupport roles through
 `POST /api/permissions`, so gating in practice means mapping your Discord roles
 once and then tightening individual actions if you want to.
 
+## Publishing the slash commands
+
+New commands do not appear in Discord until they are registered. Two ways:
+
+```bash
+# From a shell with DISCORD_BOT_TOKEN and DISCORD_CLIENT_ID set
+GUILD_ID=<your server id> npm run register:commands
+```
+
+or, without shell access to the deployment:
+
+```
+POST /api/discord/register-commands      # Owner or Administrator
+{ }                                      # defaults to the connected server
+```
+
+Registering replaces the published set with the current one, so it is safe to
+re-run after every deploy. Registering to a specific server appears immediately;
+registering globally can take up to an hour to propagate.
+
 ## Before any of this works
 
 Every action listed here that **changes** Readymode is gated on selectors
