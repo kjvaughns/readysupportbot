@@ -3,7 +3,11 @@ import { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Browser, Page } from 'playwright-core';
 import { launchBrowser } from './support/browser';
-import { submitExistingSessionForm, findContinueFrame } from '../src/readymode/continueSubmit';
+import {
+  findContinueFrame,
+  findExistingSessionForm,
+  submitExistingSessionForm,
+} from '../src/readymode/continueSubmit';
 
 /**
  * The screen as it actually is, against real Chromium and a real server.
@@ -209,4 +213,71 @@ describe('when the form does not go anywhere', () => {
     await stubbornPage.close();
     await new Promise<void>((resolve) => stubborn.close(() => resolve()));
   }, 120_000);
+});
+
+describe('recognizing the screen from its structure', () => {
+  it('identifies it by logout_other_sessions, not by any sentence', async () => {
+    await openNotice();
+
+    const detected = await findExistingSessionForm(page);
+
+    expect(detected).not.toBeNull();
+    expect(detected?.hasLogoutOtherSessions).toBe(true);
+    expect(detected?.hasContinueSubmit).toBe(true);
+    expect(detected?.formMethod).toBe('post');
+
+    await page.close();
+  });
+
+  it('is unaffected by whatever else the page says', async () => {
+    // The real page carries a footer reading "If you are not authorized to
+    // access Readymode Inc.'s software..." — which a text classifier read as a
+    // refusal, so the notice was never acted on. The form does not care.
+    const { port } = server!.address() as AddressInfo;
+    const noisy = await browser!.newPage();
+    await noisy.goto(`http://127.0.0.1:${port}/login_new/`, { waitUntil: 'domcontentloaded' });
+    await noisy.evaluate(() => {
+      const footer = document.createElement('div');
+      footer.textContent =
+        "If you are not authorized to access Readymode Inc.'s software, please close this browser window/tab.";
+      document.body.appendChild(footer);
+    });
+
+    const detected = await findExistingSessionForm(noisy);
+    expect(detected?.found).toBe(true);
+
+    await noisy.close();
+  });
+
+  it('does not fire on an ordinary login form', async () => {
+    const plain = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(`<form method="post" class="login-form">
+        <input type="password" name="password">
+        <input type="submit" value="Sign in">
+      </form>`);
+    });
+    await new Promise<void>((resolve) => plain.listen(0, '127.0.0.1', resolve));
+    const { port } = plain.address() as AddressInfo;
+
+    const plainPage = await browser!.newPage();
+    await plainPage.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
+
+    // No logout_other_sessions, no Continue: not this screen.
+    expect(await findExistingSessionForm(plainPage)).toBeNull();
+
+    await plainPage.close();
+    await new Promise<void>((resolve) => plain.close(() => resolve()));
+  });
+
+  it('reports the field names without reading a single value', async () => {
+    await openNotice();
+    const detected = await findExistingSessionForm(page);
+
+    expect(detected?.hiddenFieldNames).toContain('logout_other_sessions');
+    expect(detected?.hiddenFieldNames).toContain('login_password');
+    expect(JSON.stringify(detected)).not.toContain('never-read-this');
+
+    await page.close();
+  });
 });

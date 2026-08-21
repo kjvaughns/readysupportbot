@@ -101,3 +101,76 @@ export function submitContinueForm(preferLowLevel: boolean): FormSubmitReport {
     return report;
   }
 }
+
+
+/**
+ * Whether this page is the existing-session form, decided from its structure.
+ *
+ * The DOM states the form's purpose unambiguously: a hidden field named
+ * `logout_other_sessions` set to `on`, and a submit control labelled Continue.
+ * That is the whole meaning of the screen, written by the application itself.
+ *
+ * This exists because reading the prose was not reliable. The classifier had to
+ * judge sentences, and the page carries a standing footer — "If you are not
+ * authorized to access Readymode Inc.'s software..." — which it read as a
+ * refusal, so the notice never got as far as being acted on. Structure does not
+ * have that failure mode: either the field is in the form or it is not.
+ */
+export interface ExistingSessionForm {
+  found: boolean;
+  hasLogoutOtherSessions: boolean;
+  hasContinueSubmit: boolean;
+  /** Field names only — never a value. One of these holds the password. */
+  hiddenFieldNames: string[];
+  formMethod: string | null;
+  formActionPath: string | null;
+}
+
+export function detectExistingSessionForm(): ExistingSessionForm {
+  const result: ExistingSessionForm = {
+    found: false,
+    hasLogoutOtherSessions: false,
+    hasContinueSubmit: false,
+    hiddenFieldNames: [],
+    formMethod: null,
+    formActionPath: null,
+  };
+
+  const forms = Array.from(document.querySelectorAll('form'));
+
+  for (const form of forms) {
+    const logoutField = form.querySelector('input[name="logout_other_sessions"]') as HTMLInputElement | null;
+    const continueSubmit = form.querySelector('input[type="submit"][value="Continue" i]');
+
+    if (!logoutField && !continueSubmit) continue;
+
+    // Reading this one value is unavoidable and safe: it is a switch the
+    // application set, not anything a person typed.
+    const enabled =
+      logoutField !== null &&
+      /^(?:on|1|true|yes)$/i.test(logoutField.getAttribute('value') ?? '');
+
+    if (!enabled || !continueSubmit) continue;
+
+    result.found = true;
+    result.hasLogoutOtherSessions = true;
+    result.hasContinueSubmit = true;
+    result.formMethod = (form.getAttribute('method') ?? 'get').toLowerCase();
+
+    try {
+      const action = form.getAttribute('action');
+      result.formActionPath = action ? new URL(action, location.href).pathname : location.pathname;
+    } catch {
+      result.formActionPath = null;
+    }
+
+    result.hiddenFieldNames = Array.from(form.querySelectorAll('input[type="hidden"]'))
+      .map((field) => field.getAttribute('name') ?? '')
+      .filter(Boolean)
+      .slice(0, 20);
+
+    return result;
+  }
+
+  return result;
+}

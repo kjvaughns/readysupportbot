@@ -5,7 +5,12 @@ import type { Frame, Page } from 'playwright-core';
 import { logger } from '../security/logger';
 import { sanitizePageValue } from '../security/sanitize';
 import { checkAuthentication, waitForAuthenticated } from './authState';
-import { FormSubmitReport, submitContinueForm } from './continueSubmit.browser';
+import {
+  ExistingSessionForm,
+  FormSubmitReport,
+  detectExistingSessionForm,
+  submitContinueForm,
+} from './continueSubmit.browser';
 
 /**
  * Getting past the existing-session notice by submitting its form.
@@ -46,6 +51,30 @@ export interface ContinueSubmitResult {
 }
 
 const CONTINUE_SELECTOR = 'input[type="submit"][value="Continue" i]';
+
+/**
+ * Recognizes the existing-session screen from the DOM rather than from prose.
+ *
+ * A form carrying `logout_other_sessions=on` and a Continue submit control is
+ * that screen, whatever the surrounding page happens to say. Words were the
+ * unreliable part: the login page's standing footer reads "If you are not
+ * authorized to access Readymode Inc.'s software...", which a text classifier
+ * took for a refusal, so the notice was never acted on. A hidden field either
+ * exists or it does not.
+ */
+export async function findExistingSessionForm(
+  page: Page,
+): Promise<(ExistingSessionForm & { frame: Frame }) | null> {
+  for (const frame of page.frames()) {
+    try {
+      const detected = await frame.evaluate(detectExistingSessionForm);
+      if (detected.found) return { ...detected, frame };
+    } catch {
+      // A frame that cannot be read is not the one.
+    }
+  }
+  return null;
+}
 
 /** The frame holding the Continue control, which may not be the main document. */
 export async function findContinueFrame(page: Page): Promise<Frame | null> {

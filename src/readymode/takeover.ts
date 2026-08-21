@@ -14,7 +14,7 @@ import { sanitizePageValue } from '../security/sanitize';
 import { withoutPersonalData } from '../security/personalData';
 import { HUMAN_VERIFICATION_CONDITIONS } from './selectors';
 import { checkAuthentication, waitForAuthenticated } from './authState';
-import { submitExistingSessionForm } from './continueSubmit';
+import { findExistingSessionForm, submitExistingSessionForm } from './continueSubmit';
 import { anyPresent } from './selectors/discovery';
 import { allText, listSearchRoots } from './selectors/frames';
 import {
@@ -176,6 +176,100 @@ export async function handleInterstitial(
       dashboardVerified: false,
       explanation: 'The session notice was already handled once in this session.',
     };
+  }
+
+  /**
+   * The structural path, taken before any text is read.
+   *
+   * A form carrying `logout_other_sessions=on` and a Continue submit control is
+   * the existing-session screen. The application wrote that field; it is a
+   * plainer statement of what the form does than any sentence on the page, and
+   * unlike a sentence it cannot be drowned out by a footer.
+   *
+   * The guards that matter are kept: the right host, no human verification, and
+   * once per session. What is dropped is the requirement that the prose also
+   * read like a takeover — which is what stopped every run, because the login
+   * page's standing footer reads as a refusal.
+   */
+  const existingSession = await findExistingSessionForm(page);
+
+  if (existingSession) {
+    let host = '';
+    try {
+      host = new URL(page.url()).host;
+    } catch {
+      host = '';
+    }
+
+    if (expectedHost && host !== expectedHost) {
+      logger.warn({ expectedHost, actualHost: host }, 'Existing-session form is on another domain');
+    } else if (await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 800)) {
+      // Never negotiable, in any path.
+      console.log('[Readymode Auth] refusing: human verification on screen');
+      return {
+        classification: 'human_verification',
+        clicked: false,
+        dashboardVerified: false,
+        explanation: 'Readymode is showing a verification challenge. A person has to complete it.',
+      };
+    } else {
+      console.log('[Readymode Auth] existing_session_warning_found (structural)', {
+        formMethod: existingSession.formMethod,
+        actionPath: existingSession.formActionPath,
+        hiddenFields: existingSession.hiddenFieldNames,
+      });
+
+      attempted.add(session);
+
+      await recordEvent({
+        organizationId: session.organizationId,
+        type: 'readymode.existing_session_warning_found',
+        message:
+          'Readymode is showing the existing-session form (logout_other_sessions is set), so it will be submitted.',
+        data: {
+          host,
+          formMethod: existingSession.formMethod,
+          actionPath: existingSession.formActionPath,
+          // Names only. One of these holds the password; no value is read.
+          hiddenFields: existingSession.hiddenFieldNames,
+        },
+      });
+
+      const submitted = await submitExistingSessionForm(page);
+
+      await recordEvent({
+        organizationId: session.organizationId,
+        type: 'readymode.continue_clicked',
+        message: submitted.method
+          ? `The existing-session form was submitted via ${submitted.method}.`
+          : 'Every way of submitting the existing-session form failed.',
+        data: { method: submitted.method, attempts: submitted.attempts },
+      });
+
+      console.log('[Readymode Auth] continue submitted', {
+        method: submitted.method,
+        authenticated: submitted.authenticated,
+      });
+
+      if (submitted.authenticated) {
+        await recordEvent({
+          organizationId: session.organizationId,
+          type: 'readymode.authenticated_dashboard_confirmed',
+          message: `The authenticated interface was confirmed by the ${submitted.authenticatedMarker}.`,
+          data: { marker: submitted.authenticatedMarker },
+        });
+      }
+
+      return {
+        classification: 'admin_session_takeover',
+        clicked: submitted.submitted,
+        dashboardVerified: submitted.authenticated,
+        explanation: submitted.authenticated
+          ? `Submitted the existing-session form via ${submitted.method} and reached the interface.`
+          : (submitted.error ??
+            'The existing-session form was submitted but the interface never appeared.'),
+      };
+    }
   }
 
   const snapshot = await captureInterstitial(page);
