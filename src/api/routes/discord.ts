@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { env } from '../../config';
 import { requireAccess, requireRole } from '../../auth';
 import { getClient, isDiscordConfigured } from '../../discord/client';
-import { registerCommands } from '../../discord/registerCommands';
+import { describeRegistrationError, registerCommands } from '../../discord/registerCommands';
 import { COMMAND_NAMES } from '../../discord/commands';
 import { getStore } from '../../database';
 import { recordEvent } from '../../audit';
@@ -11,6 +11,7 @@ import { ACTION_TYPES, roleSchema } from '../../types';
 import { getActionRoles, setActionRole } from '../../permissions/overrides';
 import { DependencyNotConfiguredError, NotFoundError, ValidationError } from '../../security/errors';
 import { sanitizePageValue } from '../../security/sanitize';
+import { logger } from '../../security/logger';
 
 /**
  * Discord installation and configuration, driven from the ReadySupport
@@ -105,7 +106,7 @@ export async function discordRoutes(app: FastifyInstance): Promise<void> {
    * A guildId registers to one server and appears immediately; without one the
    * commands register globally and can take up to an hour to propagate.
    */
-  app.post('/discord/register-commands', async (request) => {
+  app.post('/discord/register-commands', async (request, reply) => {
     const context = await requireRole(request, ['owner', 'administrator']);
     const body = z.object({ guildId: snowflake.optional() }).parse(request.body ?? {});
 
@@ -116,24 +117,65 @@ export async function discordRoutes(app: FastifyInstance): Promise<void> {
     const installation = await getStore().getInstallation(context.organizationId);
     const guildId = body.guildId ?? installation?.guildId;
 
-    const count = await registerCommands(guildId);
+    try {
+      const count = await registerCommands(guildId);
 
-    await recordEvent({
-      organizationId: context.organizationId,
-      type: 'connection.updated',
-      message: `${count} slash command(s) registered${guildId ? ' for the connected server' : ' globally'}.`,
-      data: { guildId: guildId ?? null, commands: COMMAND_NAMES },
-    });
+      await recordEvent({
+        organizationId: context.organizationId,
+        type: 'connection.updated',
+        message: `${count} slash command(s) registered${guildId ? ' for the connected server' : ' globally'}.`,
+        data: { guildId: guildId ?? null, commands: COMMAND_NAMES },
+      });
 
-    return {
-      registered: count,
-      scope: guildId ? 'guild' : 'global',
-      guildId: guildId ?? null,
-      commands: COMMAND_NAMES,
-      message: guildId
-        ? `${count} commands registered for the connected server. They are available immediately.`
-        : `${count} commands registered globally. Discord can take up to an hour to show them everywhere.`,
-    };
+      return {
+        ok: true,
+        registered: count,
+        scope: guildId ? 'guild' : 'global',
+        guildId: guildId ?? null,
+        commands: COMMAND_NAMES,
+        message: guildId
+          ? `${count} commands registered for the connected server. They are available immediately.`
+          : `${count} commands registered globally. Discord can take up to an hour to show them everywhere.`,
+      };
+    } catch (error) {
+      // Classified into a safe sentence plus structural diagnostics. The bot
+      // token travels in a header Discord's error object never carries, and the
+      // route is stripped of any query string before it is recorded.
+      const failure = describeRegistrationError(error);
+
+      logger.error(
+        {
+          requestId: request.id,
+          organizationId: context.organizationId,
+          discordCode: failure.code,
+          httpStatus: failure.status,
+          method: failure.method,
+          route: failure.route,
+          fields: failure.fields,
+          reason: failure.reason,
+        },
+        'Slash command registration failed',
+      );
+
+      await recordEvent({
+        organizationId: context.organizationId,
+        type: 'connection.updated',
+        message: `Slash command registration failed: ${failure.reason}`,
+        data: { code: failure.code ?? null, status: failure.status ?? null, fields: failure.fields ?? [] },
+      });
+
+      return reply.status(502).send({
+        ok: false,
+        error: 'discord_registration_failed',
+        reason: failure.reason,
+        discordCode: failure.code ?? null,
+        httpStatus: failure.status ?? null,
+        route: failure.route ?? null,
+        // Positions in the payload Discord objected to — structural, not user data.
+        fields: failure.fields ?? [],
+        requestId: request.id,
+      });
+    }
   });
 
   /** Channels ReadySupport is approved to work in. */

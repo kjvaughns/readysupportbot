@@ -15,8 +15,21 @@ import { detectTopic } from '../knowledge/troubleshooting';
  * eventually produces.
  */
 
-const agentOption = (builder: SlashCommandBuilder) =>
-  builder
+/**
+ * Discord requires every required option to be declared before any optional
+ * one, and rejects the whole payload otherwise. The helpers below are therefore
+ * split by whether they add a required option, and the required ones are always
+ * applied first — `agentOptions(requiredStates(builder))`, never the reverse.
+ *
+ * `findOptionOrderProblems` below enforces that mechanically, so a future
+ * command cannot reintroduce the mistake and only discover it when Discord
+ * refuses the registration.
+ */
+type OptionBuilder = SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
+
+/** Optional targeting. Always applied AFTER any required option. */
+const agentOptions = (builder: OptionBuilder): SlashCommandOptionsOnlyBuilder =>
+  (builder as SlashCommandBuilder)
     .addStringOption((option) =>
       option
         .setName('agent')
@@ -27,13 +40,22 @@ const agentOption = (builder: SlashCommandBuilder) =>
       option.setName('user').setDescription('A linked Discord user, instead of typing a name.'),
     );
 
-const statesOption = (builder: SlashCommandBuilder) =>
-  builder.addStringOption((option) =>
+const requiredStatesOption = (builder: OptionBuilder): SlashCommandOptionsOnlyBuilder =>
+  (builder as SlashCommandBuilder).addStringOption((option) =>
     option
       .setName('states')
       .setDescription('States, for example: TX, VA, OH')
       .setRequired(true)
       .setMaxLength(400),
+  );
+
+const requiredPlaylistsOption = (builder: OptionBuilder): SlashCommandOptionsOnlyBuilder =>
+  (builder as SlashCommandBuilder).addStringOption((option) =>
+    option
+      .setName('playlists')
+      .setDescription('Playlist names, comma separated.')
+      .setRequired(true)
+      .setMaxLength(500),
   );
 
 export const commandBuilders: Array<
@@ -63,18 +85,18 @@ export const commandBuilders: Array<
         .setMaxLength(1000),
     ),
 
-  agentOption(
+  agentOptions(
     new SlashCommandBuilder().setName('clear_license').setDescription('Clear an agent license.'),
   ),
-  agentOption(
+  agentOptions(
     new SlashCommandBuilder().setName('reset_password').setDescription('Reset an agent password.'),
   ),
-  agentOption(
+  agentOptions(
     new SlashCommandBuilder()
       .setName('deactivate_account')
       .setDescription('Deactivate an agent account. Needs a second Owner or Administrator.'),
   ),
-  agentOption(
+  agentOptions(
     new SlashCommandBuilder()
       .setName('agent_status')
       .setDescription('Check whether an agent is logged in.'),
@@ -84,7 +106,7 @@ export const commandBuilders: Array<
     .setName('clear-licenses')
     .setDescription("Log out inactive Readymode users, freeing the seats they hold."),
 
-  agentOption(
+  agentOptions(
     new SlashCommandBuilder()
       .setName('force-logout')
       .setDescription('Sign a specific user out of Readymode. Needs a second approver.'),
@@ -94,42 +116,32 @@ export const commandBuilders: Array<
       .setDescription('Also reset their password so the seat cannot be retaken.'),
   ),
 
-  agentOption(
-    new SlashCommandBuilder()
-      .setName('add-assignment')
-      .setDescription('Assign an agent to a playlist (lead pool).'),
-  )
-    .addStringOption((option) =>
-      option
-        .setName('playlists')
-        .setDescription('Playlist names, comma separated.')
-        .setRequired(true)
-        .setMaxLength(500),
-    )
-    .addStringOption((option) =>
-      option
-        .setName('level')
-        .setDescription('Membership level. Defaults to primary.')
-        .addChoices(
-          { name: 'Primary', value: 'primary' },
-          { name: 'Backup', value: 'backup' },
-          { name: 'Tertiary', value: 'tertiary' },
-        ),
+  agentOptions(
+    requiredPlaylistsOption(
+      new SlashCommandBuilder()
+        .setName('add-assignment')
+        .setDescription('Assign an agent to a playlist (lead pool).'),
     ),
-
-  agentOption(
-    new SlashCommandBuilder()
-      .setName('remove-assignment')
-      .setDescription('Remove an agent from a playlist (lead pool).'),
   ).addStringOption((option) =>
     option
-      .setName('playlists')
-      .setDescription('Playlist names, comma separated.')
-      .setRequired(true)
-      .setMaxLength(500),
+      .setName('level')
+      .setDescription('Membership level. Defaults to primary.')
+      .addChoices(
+        { name: 'Primary', value: 'primary' },
+        { name: 'Backup', value: 'backup' },
+        { name: 'Tertiary', value: 'tertiary' },
+      ),
   ),
 
-  agentOption(
+  agentOptions(
+    requiredPlaylistsOption(
+      new SlashCommandBuilder()
+        .setName('remove-assignment')
+        .setDescription('Remove an agent from a playlist (lead pool).'),
+    ),
+  ),
+
+  agentOptions(
     new SlashCommandBuilder()
       .setName('view-assignments')
       .setDescription('See which playlists an agent is in.'),
@@ -150,26 +162,22 @@ export const commandBuilders: Array<
     .setName('license_usage')
     .setDescription('See which agents are currently using licenses.'),
 
-  statesOption(
-    agentOption(
-      new SlashCommandBuilder()
-        .setName('set_states')
-        .setDescription('Replace an agent state assignment.'),
-    ) as SlashCommandBuilder,
+  agentOptions(
+    requiredStatesOption(
+      new SlashCommandBuilder().setName('set_states').setDescription('Replace an agent state assignment.'),
+    ),
   ),
-  statesOption(
-    agentOption(
+  agentOptions(
+    requiredStatesOption(
       new SlashCommandBuilder().setName('add_states').setDescription('Add states to an agent.'),
-    ) as SlashCommandBuilder,
+    ),
   ),
-  statesOption(
-    agentOption(
-      new SlashCommandBuilder()
-        .setName('remove_states')
-        .setDescription('Remove states from an agent.'),
-    ) as SlashCommandBuilder,
+  agentOptions(
+    requiredStatesOption(
+      new SlashCommandBuilder().setName('remove_states').setDescription('Remove states from an agent.'),
+    ),
   ),
-  agentOption(
+  agentOptions(
     new SlashCommandBuilder()
       .setName('view_states')
       .setDescription('See which states an agent receives.'),
@@ -190,6 +198,64 @@ export const commandBuilders: Array<
 ];
 
 export const COMMAND_NAMES = commandBuilders.map((builder) => builder.name);
+
+export interface OptionOrderProblem {
+  command: string;
+  /** The required option that arrives too late. */
+  option: string;
+  index: number;
+  /** The optional option it wrongly follows. */
+  after: string;
+}
+
+/**
+ * Finds required options declared after an optional one.
+ *
+ * Discord rejects the entire registration payload when this happens, and the
+ * error it returns names an index rather than a command, so catching it here
+ * turns a confusing 400 into a precise local failure.
+ */
+export function findOptionOrderProblems(
+  commands: Array<Record<string, unknown>>,
+): OptionOrderProblem[] {
+  const problems: OptionOrderProblem[] = [];
+
+  const walk = (path: string, options: Array<Record<string, unknown>>): void => {
+    let lastOptional: string | null = null;
+
+    options.forEach((option, index) => {
+      const name = String(option.name ?? index);
+      const type = Number(option.type ?? 0);
+
+      // Subcommands (1) and subcommand groups (2) carry their own option lists,
+      // each ordered independently.
+      if (type === 1 || type === 2) {
+        walk(`${path} ${name}`, (option.options as Array<Record<string, unknown>>) ?? []);
+        return;
+      }
+
+      if (option.required === true) {
+        if (lastOptional) {
+          problems.push({ command: path, option: name, index, after: lastOptional });
+        }
+      } else {
+        lastOptional = name;
+      }
+    });
+  };
+
+  for (const command of commands) {
+    walk(String(command.name ?? 'unknown'), (command.options as Array<Record<string, unknown>>) ?? []);
+  }
+
+  return problems;
+}
+
+/** The registration payload, as Discord will receive it. */
+export function buildCommandPayload(): Array<Record<string, unknown>> {
+  return commandBuilders.map((builder) => builder.toJSON() as unknown as Record<string, unknown>);
+}
+
 
 export interface CommandParseResult {
   status: 'ok' | 'needs_information';
