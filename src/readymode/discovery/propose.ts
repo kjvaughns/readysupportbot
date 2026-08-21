@@ -61,7 +61,19 @@ export interface ProposedSelector {
 
 export interface ProposalOutcome {
   proposals: ProposedSelector[];
+  /** Controls the evidence covered but could not identify uniquely. */
   unproposed: Array<{ control: string; reason: string }>;
+  /**
+   * Controls that were never on screen during this run — the login form when
+   * the session was already signed in, for example. Distinct from unproposed:
+   * nothing was wrong, there was simply nothing to look at.
+   */
+  notObservable: Array<{ control: string; reason: string }>;
+}
+
+export interface ProposalOptions {
+  /** Control name to the reason it could not be observed this run. */
+  skip?: Record<string, string>;
 }
 
 type Category = 'input' | 'button' | 'select' | 'checkbox' | 'table';
@@ -331,6 +343,7 @@ function strategyOptions(candidate: Candidate): StrategyOption[] {
 export function proposeSelectors(
   evidence: InterfaceEvidence,
   controls: ControlDefinition[],
+  options: ProposalOptions = {},
 ): ProposalOutcome {
   const candidates = collectCandidates(evidence);
 
@@ -344,8 +357,15 @@ export function proposeSelectors(
 
   const proposals: ProposedSelector[] = [];
   const unproposed: Array<{ control: string; reason: string }> = [];
+  const notObservable: Array<{ control: string; reason: string }> = [];
 
   for (const control of controls) {
+    const skipped = options.skip?.[control.name];
+    if (skipped) {
+      notObservable.push({ control: control.name, reason: skipped });
+      continue;
+    }
+
     const matcher = CONTROL_MATCHERS.find((entry) => entry.control === control.name);
     if (!matcher) {
       unproposed.push({ control: control.name, reason: 'No evidence matcher is defined for this control.' });
@@ -409,7 +429,7 @@ export function proposeSelectors(
   }
 
   proposals.sort((a, b) => b.confidence - a.confidence);
-  return { proposals, unproposed };
+  return { proposals, unproposed, notObservable };
 }
 
 /** Whether a proposal is strong enough to be promoted to an active selector. */

@@ -232,11 +232,40 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           evidence: proposal.evidence,
         })),
         unproposed: result.unproposed,
+        // The count is returned explicitly rather than left to the caller to
+        // derive: a consumer reading a field that does not exist renders "0"
+        // next to a list of 24, which is worse than no number at all.
+        unproposedCount: result.unproposed.length,
+        // Aliases, so a consumer using either name gets a truthful figure.
+        unresolved: result.unproposed,
+        unresolvedCount: result.unproposed.length,
+        notObservable: result.notObservable,
+        notObservableCount: result.notObservable.length,
+        counts: {
+          pagesCaptured: result.evidenceSummary.pages,
+          rootsInspected: result.roots.total,
+          rootsFailed: result.roots.failed,
+          controlsTotal: result.profile.controlsTotal,
+          proposed: result.proposals.length,
+          usable: result.profile.controlsProposed,
+          unresolved: result.unproposed.length,
+          notObservable: result.notObservable.length,
+        },
+        loginPageObserved: result.loginPageObserved,
         redactions: result.evidenceSummary,
-        message:
-          `Captured ${result.evidenceSummary.pages} page(s) and proposed ${result.profile.controlsProposed} ` +
-          `of ${result.profile.controlsTotal} controls. Nothing in Readymode was changed. ` +
-          `An Owner must approve this profile before the selectors are used.`,
+        message: [
+          `Captured ${result.evidenceSummary.pages} page(s) across ${result.roots.total} frame(s)` +
+            `${result.roots.failed > 0 ? ` (${result.roots.failed} unreadable)` : ''}.`,
+          `Proposed ${result.profile.controlsProposed} of ${result.profile.controlsTotal} controls;` +
+            ` ${result.unproposed.length} unresolved` +
+            `${result.notObservable.length > 0 ? `, ${result.notObservable.length} not on screen this run` : ''}.`,
+          result.loginPageObserved
+            ? ''
+            : 'The session was already signed in, so the login controls were not observable.',
+          'Nothing in Readymode was changed. An Owner must approve this profile before the selectors are used.',
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     } finally {
       await session.close().catch(() => undefined);

@@ -157,9 +157,49 @@ export interface InterfaceEvidence {
   };
 }
 
-/** Raw shape returned from inside the browser, before sanitizing on the Node side. */
-export interface RawRootEvidence extends Omit<RootEvidence, 'truncated'> {
+/**
+ * Exactly what the browser-side collector returns, before the Node side
+ * sanitizes it and adds the root's identity.
+ *
+ * Naming this precisely matters: the collector used to return `unknown` and be
+ * invoked through `as never` casts, which silently hid a wrong argument shape
+ * and produced empty evidence on every page.
+ */
+export interface CollectorOutput {
+  title: string;
+  childFrameUrls: string[];
+  nav: NavEvidence[];
+  buttons: ButtonEvidence[];
+  inputs: InputEvidence[];
+  selects: SelectEvidence[];
+  checkboxes: CheckboxEvidence[];
+  links: LinkEvidence[];
+  forms: FormEvidence[];
+  tables: TableEvidence[];
   truncated: string[];
+  passwordFieldsSeen: number;
+}
+
+/**
+ * The single argument the collector receives.
+ *
+ * Playwright serializes one argument into the page, so everything the collector
+ * needs travels in this object.
+ */
+export interface CollectorOptions {
+  caps: typeof EVIDENCE_CAPS;
+  stableAttributes: readonly string[];
+}
+
+/** How many roots produced evidence, and how many failed outright. */
+export function rootStats(evidence: InterfaceEvidence): {
+  total: number;
+  failed: number;
+  succeeded: number;
+} {
+  const roots = evidence.pages.flatMap((page) => page.roots);
+  const failed = roots.filter((root) => root.error).length;
+  return { total: roots.length, failed, succeeded: roots.length - failed };
 }
 
 export function emptyRedactions(): InterfaceEvidence['redactions'] {

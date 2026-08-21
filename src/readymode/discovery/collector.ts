@@ -10,9 +10,15 @@
  * It reads attributes, text and computed styles. It never calls click, fill,
  * submit or focus, and never reads `.value`, `.checked`, cookies or storage.
  */
-import type { EVIDENCE_CAPS } from './evidence';
+import type { CollectorOptions, CollectorOutput } from './evidence';
 
-export function collectFromRoot(caps: typeof EVIDENCE_CAPS, stableAttributes: readonly string[]): unknown {
+/**
+ * Takes ONE object argument, because `page.evaluate` serializes exactly one.
+ * It previously took two positional parameters and was called with a single
+ * object through an `as never` cast, so `stableAttributes` arrived undefined
+ * and every root threw before collecting anything.
+ */
+export function collectFromRoot({ caps, stableAttributes }: CollectorOptions): CollectorOutput {
   const cap = <T>(list: T[], max: number): T[] => list.slice(0, max);
   const text = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -93,8 +99,13 @@ export function collectFromRoot(caps: typeof EVIDENCE_CAPS, stableAttributes: re
     const type = (element.getAttribute('type') ?? '').toLowerCase();
     return {
       ...base(element as Element, index + 1),
-      kind:
-        type === 'submit' ? 'submit' : type === 'reset' ? 'reset' : (element as Element).tagName === 'A' ? 'link-button' : 'button',
+      kind: (type === 'submit'
+        ? 'submit'
+        : type === 'reset'
+          ? 'reset'
+          : (element as Element).tagName === 'A'
+            ? 'link-button'
+            : 'button') as CollectorOutput['buttons'][number]['kind'],
       // The button's own value attribute is its label, not user data.
       label: accessibleName(element as Element) || text((element as Element).getAttribute('value')),
       role: (element as Element).getAttribute('role') ?? undefined,
@@ -112,7 +123,7 @@ export function collectFromRoot(caps: typeof EVIDENCE_CAPS, stableAttributes: re
     if (sensitive) passwordFieldsSeen += 1;
 
     // Note what is absent: value, defaultValue, checked. Never read.
-    const record: Record<string, unknown> = {
+    const record: CollectorOutput['inputs'][number] = {
       ...base(element as Element, index + 1),
       type,
       required: (element as HTMLInputElement).required === true,

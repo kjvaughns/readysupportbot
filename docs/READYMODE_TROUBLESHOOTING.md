@@ -42,6 +42,34 @@ curl -X POST -H "Authorization: Bearer <owner-token>" \
 Approval is refused when a profile identified nothing uniquely — approving it
 would create the appearance of a verified interface while changing nothing.
 
+## Discovery captured pages but found zero controls
+
+Every root failed to collect. Discovery now refuses to create a profile in this
+case and returns `discovery_collected_nothing` naming how many frames were
+unreadable, rather than recording "nothing found" as though it were an
+observation. The first underlying error is included, and each failing root is
+logged with its URL.
+
+Previously this produced a profile full of empty evidence, because the
+collector's error was stored on the root and never surfaced.
+
+## "Unresolved 0 controls" next to a list of 24
+
+The discover response now returns the figure explicitly — `unresolvedCount`,
+plus `unresolved`, `unproposedCount` and a `counts` object — so nothing has to
+derive it. A consumer reading a field that does not exist renders `0`, which is
+worse than showing no number at all.
+
+## Discovery says the login controls were not observable
+
+Expected when the Browserbase session was still signed in: the login URL
+redirects to the dashboard, so the login form is never on screen. Those controls
+are reported under `notObservable` rather than `unresolved` — nothing failed,
+there was simply nothing to look at. `loginPageObserved: false` in the response
+marks the run.
+
+To capture them, start a session that is not already authenticated.
+
 ## Discovery proposes very few controls
 
 Look at `unproposed`, which gives a reason per control:

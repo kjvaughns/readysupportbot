@@ -1,10 +1,12 @@
 import type { Page } from 'playwright-core';
 import { sanitizePageValue } from '../../security/sanitize';
+import { logger } from '../../security/logger';
 import { scrubDeep, scrubPersonalData } from '../../security/personalData';
 import { LocatorRoot, listSearchRoots, rootName, rootUrl } from '../selectors/frames';
 import { captureScreenshot } from '../session';
 import { collectFromRoot } from './collector';
 import {
+  CollectorOutput,
   EVIDENCE_CAPS,
   InterfaceEvidence,
   PageEvidence,
@@ -22,14 +24,6 @@ import {
  * that runs inside the browser reads attributes, text and computed styles only;
  * it never touches `.value`, `.checked`, cookies or storage.
  */
-
-interface CollectorOutput {
-  title: string;
-  childFrameUrls: string[];
-  [key: string]: unknown;
-  truncated: string[];
-  passwordFieldsSeen: number;
-}
 
 /** Sanitizes and scrubs everything one root returned. */
 function normalizeRoot(
@@ -79,17 +73,32 @@ export async function inspectCurrentPage(
   const roots = listSearchRoots(page);
   const collected: RootEvidence[] = [];
 
+  let failedRoots = 0;
+
   for (const [index, root] of roots.entries()) {
+    const name = rootName(root, index);
     try {
-      const raw = (await root.evaluate(collectFromRoot as never, {
+      // One object argument, matching what `page.evaluate` actually passes.
+      // No casts: if the shapes ever diverge again, this stops compiling.
+      const raw = await root.evaluate(collectFromRoot, {
         caps: EVIDENCE_CAPS,
         stableAttributes: STABLE_ATTRIBUTES,
-      } as never)) as CollectorOutput;
+      });
       collected.push(normalizeRoot(root, index, raw, counters));
     } catch (error) {
-      // A cross-origin or torn-down frame is recorded, never fatal.
+      failedRoots += 1;
+      const detail = sanitizePageValue(
+        error instanceof Error ? error.message : 'Root could not be read.',
+        200,
+      );
+
+      // Recorded *and* logged. Silently collecting nothing looks identical to a
+      // page that genuinely has nothing on it, which is how a broken collector
+      // went unnoticed.
+      logger.warn({ step, root: name, rootUrl: rootUrl(root), detail }, 'Evidence collection failed for a root');
+
       collected.push({
-        rootName: rootName(root, index),
+        rootName: name,
         rootUrl: sanitizePageValue(rootUrl(root), EVIDENCE_CAPS.maxUrlLength),
         isMain: index === 0,
         title: '',
@@ -103,9 +112,16 @@ export async function inspectCurrentPage(
         forms: [],
         tables: [],
         truncated: [],
-        error: error instanceof Error ? error.message.slice(0, 200) : 'Root could not be read.',
+        error: detail,
       });
     }
+  }
+
+  if (failedRoots > 0) {
+    logger.warn(
+      { step, failedRoots, totalRoots: roots.length },
+      'Some roots produced no evidence',
+    );
   }
 
   const screenshotPath = options.screenshot === false ? null : await captureScreenshot(page, `discovery-${step}`);

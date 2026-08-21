@@ -2,6 +2,8 @@ import type { Page } from 'playwright-core';
 import { logger } from '../../security/logger';
 import { sanitizePageValue } from '../../security/sanitize';
 import { listSearchRoots } from '../selectors/frames';
+import { LOGIN_SUCCESS_CONDITIONS } from '../selectors';
+import { anyPresent } from '../selectors/discovery';
 import { ReadymodeSession, ensureAuthenticated } from '../session';
 import { EVIDENCE_CAPS, InterfaceEvidence, PageEvidence } from './evidence';
 import { buildEvidence, inspectCurrentPage } from './inspector';
@@ -52,6 +54,12 @@ export interface WalkResult {
   visited: string[];
   /** Navigation labels that were skipped, with the reason. */
   skipped: Array<{ label: string; reason: string }>;
+  /**
+   * False when the login URL went straight to the dashboard because the
+   * persistent Browserbase session was still signed in. The login controls are
+   * then simply not on screen — that is not a discovery failure.
+   */
+  loginPageObserved: boolean;
 }
 
 interface NavigationCandidate {
@@ -100,9 +108,23 @@ export async function discoverInterface(
 
   const { page } = session;
 
-  // 1. The login page, before signing in.
+  // 1. The login page, before signing in — the only moment the login controls
+  //    exist. A persistent session that is still signed in redirects straight
+  //    to the dashboard, in which case there is no login form to observe.
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
-  pages.push(await inspectCurrentPage(page, 'login', counters, { screenshot: screenshots }));
+  const loginPageObserved = !(await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 1500));
+
+  pages.push(
+    await inspectCurrentPage(page, loginPageObserved ? 'login' : 'already-signed-in', counters, {
+      screenshot: screenshots,
+    }),
+  );
+
+  if (!loginPageObserved) {
+    logger.info(
+      'The Browserbase session was already signed in, so the login page was not shown.',
+    );
+  }
 
   // 2. Sign in. This also handles the administrator session notice.
   await ensureAuthenticated(session);
@@ -138,7 +160,12 @@ export async function discoverInterface(
     await page.goto(dashboardUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
   }
 
-  return { evidence: buildEvidence(loginUrl, pages, counters), visited, skipped };
+  return {
+    evidence: buildEvidence(loginUrl, pages, counters),
+    visited,
+    skipped,
+    loginPageObserved,
+  };
 }
 
 /**

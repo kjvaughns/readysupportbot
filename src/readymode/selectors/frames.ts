@@ -15,8 +15,19 @@ import type { Frame, Page } from 'playwright-core';
 
 export type LocatorRoot = Page | Frame;
 
-/** Frames that can never hold application content. */
-const IGNORED_URLS = new Set(['about:blank', 'about:srcdoc', '']);
+/**
+ * Frames that cannot hold application content.
+ *
+ * `about:srcdoc` is deliberately NOT here: a srcdoc frame carries inline
+ * content by definition, and skipping it loses whatever is inside.
+ *
+ * A frame populated by `document.write` keeps the URL `about:blank` and is
+ * still excluded, because including every blank frame costs a lookup timeout
+ * per candidate. If a legacy interface turns out to build frames that way, the
+ * `frames` list in the discovery report will show them and this is the line to
+ * revisit.
+ */
+const IGNORED_URLS = new Set(['about:blank', '']);
 
 /** Upper bound on how many roots are searched, so a frame bomb cannot stall a run. */
 export const MAX_SEARCH_ROOTS = 25;
