@@ -12,9 +12,10 @@ import { recordEvent } from '../audit';
 import { logger } from '../security/logger';
 import { sanitizePageValue } from '../security/sanitize';
 import { withoutPersonalData } from '../security/personalData';
-import { HUMAN_VERIFICATION_CONDITIONS, TAKEOVER_CONTROLS } from './selectors';
+import { HUMAN_VERIFICATION_CONDITIONS } from './selectors';
 import { checkAuthentication, waitForAuthenticated } from './authState';
-import { anyPresent, tryDiscover } from './selectors/discovery';
+import { submitExistingSessionForm } from './continueSubmit';
+import { anyPresent } from './selectors/discovery';
 import { allText, listSearchRoots } from './selectors/frames';
 import {
   InterstitialButton,
@@ -171,91 +172,65 @@ export async function handleInterstitial(
   // never clicked.
   console.log('[Readymode Auth] existing_session_warning_found');
 
-  // Counted with a plain locator before any registry lookup, so the number is
-  // reported even when the registry fails to resolve the control. A zero here
-  // and a zero after are different problems: nothing on the page, versus
-  // something on the page that the registry could not identify.
-  const rawCandidates = page.locator(
-    'button:has-text("Continue"), a:has-text("Continue"), input[type="submit"][value="Continue" i], input[type="button"][value="Continue" i], [role="button"]:has-text("Continue")',
-  );
-  const rawCount = await rawCandidates.count().catch(() => 0);
-  const rawVisible = await rawCandidates
-    .first()
-    .isVisible()
-    .catch(() => false);
+  await recordEvent({
+    organizationId: session.organizationId,
+    type: 'readymode.existing_session_warning_found',
+    message: 'Readymode reported that this administrator is already signed in elsewhere.',
+    data: { host: snapshot.host, matched: verdict.matched },
+  });
 
-  console.log('[Readymode Auth] continue candidates', rawCount);
-  console.log('[Readymode Auth] continue visible', rawVisible);
+  // Burn the attempt before acting: a submission that throws must not be retried.
+  attempted.add(session);
 
-  let found = await tryDiscover(page, TAKEOVER_CONTROLS.continue, { timeoutMs: 2500 });
-  let usedFirstOfMany = false;
-
-  if (!found.resolved) {
-    // Last resort, and only here. This is authentication, the notice has
-    // already been classified as a genuine takeover on the right host, and the
-    // screen carries one Continue beside one Cancel. Taking the first match is
-    // recorded rather than silent.
-    found = await tryDiscover(page, TAKEOVER_CONTROLS.continue, {
-      timeoutMs: 2500,
-      allowFirstOfMany: true,
-    });
-    usedFirstOfMany = Boolean(found.resolved);
-  }
-
-  if (!found.resolved) {
-    console.log(
-      `[Readymode Auth] continue NOT resolved despite ${rawCount} raw candidate(s) — refusing to click`,
-    );
-
-    return {
-      classification: 'unknown',
-      clicked: false,
-      dashboardVerified: false,
-      explanation:
-        'Readymode reported an existing session, but no Continue control could be found in any shape.',
-    };
-  }
-
-  console.log(
-    `[Readymode Auth] continue control found strategy=${found.resolved.strategy} firstOfMany=${usedFirstOfMany}`,
-  );
+  /**
+   * Submit the form rather than click the control.
+   *
+   * The notice is the login form re-rendered with `logout_other_sessions`
+   * already set to `on`, and Continue is an `<input type="submit">` inside it.
+   * The page is asking for a POST, not a mouse event — and a click has four
+   * ways to fail at something the form can simply be asked to do.
+   */
+  const submission = await submitExistingSessionForm(page);
 
   await recordEvent({
     organizationId: session.organizationId,
     type: 'readymode.continue_control_found',
-    message: 'The Continue control on the existing-session notice was located.',
+    message: submission.formFound
+      ? `The existing-session form was found (${submission.formMethod ?? 'unknown'} to ${submission.formActionPath ?? 'the same path'}).`
+      : 'No form containing the Continue control was found.',
     data: {
-      frame: found.resolved.rootName,
-      strategy: found.resolved.strategy,
-      firstOfMany: usedFirstOfMany,
+      formFound: submission.formFound,
+      // Field names only. One of them holds the password; its value is never
+      // read, logged or stored.
+      hiddenFields: submission.hiddenFieldNames,
+      attempts: submission.attempts.map((attempt) => attempt.method),
     },
   });
 
-  // Burn the attempt before clicking: a click that throws must not be retried.
-  attempted.add(session);
+  if (!submission.attempted) {
+    return {
+      classification: 'unknown',
+      clicked: false,
+      dashboardVerified: false,
+      explanation: submission.error ?? 'The existing-session form could not be found.',
+    };
+  }
 
-  await recordEvent({
-    organizationId: session.organizationId,
-    type: 'readymode.session_takeover',
-    message: 'Continuing past the Readymode administrator session notice.',
-    data: {
-      host: snapshot.host,
-      frame: found.resolved.rootName,
-      strategy: found.resolved.strategy,
-      matched: verdict.matched,
-    },
+  console.log('[Readymode Auth] continue submitted', {
+    method: submission.method,
+    authenticated: submission.authenticated,
   });
-
-  await found.resolved.locator.click();
-  await page.waitForLoadState('domcontentloaded').catch(() => undefined);
-
-  console.log('[Readymode Auth] continue clicked');
 
   await recordEvent({
     organizationId: session.organizationId,
     type: 'readymode.continue_clicked',
-    message: 'Continue was pressed on the existing-session notice.',
-    data: { host: snapshot.host },
+    message: submission.method
+      ? `The existing-session form was submitted via ${submission.method}.`
+      : 'Every way of submitting the existing-session form failed.',
+    data: {
+      method: submission.method,
+      attempts: submission.attempts,
+    },
   });
 
   // A verification prompt appearing after the click is still never solved.
@@ -271,8 +246,10 @@ export async function handleInterstitial(
   // After pressing Continue, the dashboard has to be proved by the signed-in
   // shell. A page still showing the login form never counts, however long it is
   // waited for.
-  // Signing the other session out and loading the dashboard takes a moment.
-  const confirmation = await waitForAuthenticated(page, 30_000);
+  // The submission already waited for and confirmed the signed-in shell.
+  const confirmation = submission.authenticated
+    ? { authenticated: true, marker: submission.authenticatedMarker }
+    : await waitForAuthenticated(page, 15_000);
   const dashboardVerified = confirmation.authenticated;
 
   console.log(`[Readymode Auth] dashboard confirmed=${dashboardVerified} marker=${confirmation.marker ?? 'none'}`);
@@ -288,7 +265,7 @@ export async function handleInterstitial(
 
   return {
     classification: 'admin_session_takeover',
-    clicked: true,
+    clicked: submission.submitted,
     dashboardVerified,
     explanation: dashboardVerified
       ? 'Continued past the administrator session notice and reached the dashboard.'

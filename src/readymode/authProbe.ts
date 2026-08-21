@@ -17,6 +17,7 @@ import {
   ContinueCandidateMetadata,
   collectContinueCandidates,
 } from './continueCandidates.browser';
+import { submitExistingSessionForm } from './continueSubmit';
 import { ReadymodeSession, ensureAuthenticated, lastAuthenticationTrace } from './session';
 
 /**
@@ -328,20 +329,23 @@ export async function runAuthProbe(session: ReadymodeSession): Promise<AuthProbe
   console.log('[Readymode Auth] before click', { ...beforeClick, locator: description });
 
   const navigationsBefore = navigations.length;
-  let clickError: string | null = null;
 
-  try {
-    // Not caught away: whatever this throws is the answer.
-    await target.click({ timeout: 10_000 });
-    console.log('[Readymode Auth] click completed');
-  } catch (error) {
-    clickError = sanitizePageValue(error instanceof Error ? error.message : 'unknown', 300);
-    console.log('[Readymode Auth] click threw', clickError);
+  /**
+   * Submit the form rather than click the control.
+   *
+   * The notice is the login form re-rendered with `logout_other_sessions`
+   * already set, and Continue is an `<input type="submit">` inside it. Asking
+   * the form to submit is a direct statement of what the page wants, and it
+   * cannot be defeated by an overlay or an off-screen rectangle.
+   */
+  const submission = await submitExistingSessionForm(page);
 
-    return finish('click_threw', `The click on ${description} threw: ${clickError}`, {
+  if (!submission.submitted && submission.error && submission.attempts.every((a) => a.error)) {
+    const firstError = submission.attempts.find((attempt) => attempt.error)?.error ?? submission.error;
+    return finish('click_threw', `Submitting ${description} failed: ${firstError}`, {
       chosenLocator: description,
       beforeClick,
-      clickError,
+      clickError: firstError,
     });
   }
 
@@ -354,7 +358,12 @@ export async function runAuthProbe(session: ReadymodeSession): Promise<AuthProbe
   const shared = { chosenLocator: description, beforeClick, clickCompleted: true, clickError: null };
 
   if (confirmed.authenticated) {
-    return finish('authenticated', `Continue worked. Confirmed by the ${confirmed.marker}.`, shared);
+    return finish(
+      'authenticated',
+      `The existing-session form was submitted via ${submission.method ?? 'an unknown method'}. ` +
+        `Confirmed by the ${confirmed.marker}.`,
+      shared,
+    );
   }
 
   if (!navigated) {
