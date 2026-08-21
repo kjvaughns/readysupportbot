@@ -89,7 +89,7 @@ function noticeSnapshot(overrides: Record<string, unknown> = {}) {
     hasCaptcha: false,
     dashboardSignalPresent: false,
     ...overrides,
-  };
+  } as Parameters<typeof classifyInterstitial>[0];
 }
 
 describe('the recorded existing-session screen', () => {
@@ -185,5 +185,94 @@ describe('the screen is cleared before discovery starts', () => {
 
     const state = await checkAuthentication(page, 50);
     expect(state.authenticated).toBe(false);
+  });
+});
+
+describe('the page says more than it means', () => {
+  /**
+   * The whole Readymode login page, footer included. This is the text that was
+   * actually being classified, and the reason every run stopped here.
+   */
+  const FULL_PAGE = [
+    'Welcome',
+    'Apex Financial',
+    'Please sign on with valid account credentials',
+    "We're sorry...",
+    'K.Vaughns is already logged in!',
+    'If you choose to continue, you will log out all your other sessions.',
+    'Continue',
+    'Cancel',
+    'Disable webphone',
+    'Try the New Agent UI',
+    'Same login, just a new interface!',
+    'Open preview',
+    'Web Phone (Automatic)',
+    'Do not have an account? Contact your admin',
+    'Recommended Browser:',
+    'Need help? +1 800 694-1049 | support@readymode.com',
+    // The standing footer. It is on this page whatever has happened.
+    "If you are not authorized to access Readymode Inc.'s software, please close this browser window/tab.",
+    'Readymode Inc. 2026 - Privacy Policy',
+  ].join('\n');
+
+  const NOTICE_ONLY = [
+    "We're sorry...",
+    'K.Vaughns is already logged in!',
+    'If you choose to continue, you will log out all your other sessions.',
+  ].join('\n');
+
+  it('is not fooled by the footer, which every login page carries', () => {
+    // Before this, "not authorized" in the footer matched the permission
+    // pattern, classified the whole screen as a refusal, and the takeover case
+    // was never reached. Continue was never pressed on any run.
+    const verdict = classifyInterstitial(noticeSnapshot({ bodyText: FULL_PAGE }));
+
+    expect(verdict.classification).toBe('admin_session_takeover');
+    expect(verdict.mayClickContinue).toBe(true);
+  });
+
+  it('reads the notice region in preference to the whole page', () => {
+    const verdict = classifyInterstitial(
+      noticeSnapshot({ bodyText: FULL_PAGE, noticeText: NOTICE_ONLY }),
+    );
+    expect(verdict.mayClickContinue).toBe(true);
+  });
+
+  it('still refuses a refusal the page actually asserts', () => {
+    // "You are not authorized" is the server saying no. The conditional
+    // footer is not.
+    const verdict = classifyInterstitial(
+      noticeSnapshot({
+        bodyText: `${FULL_PAGE}\nYou are not authorized to sign in as an administrator.`,
+      }),
+    );
+
+    expect(verdict.classification).toBe('permission_denied');
+    expect(verdict.mayClickContinue).toBe(false);
+  });
+
+  it('still refuses when the notice region itself carries the refusal', () => {
+    const verdict = classifyInterstitial(
+      noticeSnapshot({
+        bodyText: FULL_PAGE,
+        noticeText: `${NOTICE_ONLY}\nAccess denied.`,
+      }),
+    );
+
+    expect(verdict.mayClickContinue).toBe(false);
+  });
+
+  it('never narrows a safety signal the same way', () => {
+    // A conditional warning about destroying data is still a warning, and a
+    // captcha counts wherever it appears.
+    const destructive = classifyInterstitial(
+      noticeSnapshot({
+        bodyText: `${FULL_PAGE}\nIf you continue, this will permanently delete the campaign.`,
+      }),
+    );
+    expect(destructive.mayClickContinue).toBe(false);
+
+    const captcha = classifyInterstitial(noticeSnapshot({ bodyText: FULL_PAGE, hasCaptcha: true }));
+    expect(captcha.classification).toBe('human_verification');
   });
 });

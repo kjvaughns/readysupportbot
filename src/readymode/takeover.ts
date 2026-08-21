@@ -80,11 +80,26 @@ export async function captureInterstitial(page: Page): Promise<InterstitialSnaps
 
   const bodyText = withoutPersonalData(sanitizePageValue(await allText(page), 4000));
 
+  /**
+   * The notice's own region, when the page has one.
+   *
+   * Readymode's login page carries a standing footer — "If you are not
+   * authorized to access Readymode Inc.'s software, please close this browser
+   * window/tab" — inside a sibling <div id="footer">. Read as part of the page
+   * body it matched the permission-denied pattern, so every existing-session
+   * notice classified as a refusal and Continue was never pressed.
+   *
+   * The login box is where the notice actually lives, so it is captured
+   * separately and the refusal patterns read that instead.
+   */
+  const noticeText = await noticeRegionText(page);
+
   return {
     url: sanitizePageValue(page.url(), 300),
     host,
     title: withoutPersonalData(sanitizePageValue(await page.title().catch(() => ''), 200)),
     bodyText,
+    noticeText,
     buttons,
     hasPasswordField: await hasPasswordField(page),
     hasCaptcha: await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 800),
@@ -93,6 +108,37 @@ export async function captureInterstitial(page: Page): Promise<InterstitialSnaps
     // page could read as "the dashboard is present".
     dashboardSignalPresent: (await checkAuthentication(page, 800)).authenticated,
   };
+}
+
+/** Containers the notice is rendered in, most specific first. */
+const NOTICE_REGIONS = [
+  'form.login-form',
+  '#login_box',
+  '.login_container',
+  '[role="dialog"]',
+  '.modal',
+  '.ui-dialog',
+];
+
+/** Text of the notice region, or empty when the page has no identifiable one. */
+async function noticeRegionText(page: Page): Promise<string> {
+  for (const root of listSearchRoots(page)) {
+    for (const selector of NOTICE_REGIONS) {
+      try {
+        const region = root.locator(selector).first();
+        if ((await region.count()) === 0) continue;
+
+        const text = await region.innerText({ timeout: 1500 }).catch(() => '');
+        if (text.trim().length > 20) {
+          return withoutPersonalData(sanitizePageValue(text, 2000));
+        }
+      } catch {
+        // Try the next container.
+      }
+    }
+  }
+
+  return '';
 }
 
 async function hasPasswordField(page: Page): Promise<boolean> {

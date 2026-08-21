@@ -36,6 +36,18 @@ export interface InterstitialSnapshot {
   host: string;
   title: string;
   bodyText: string;
+  /**
+   * Text of the notice itself — the dialog or login box — when it can be told
+   * apart from the rest of the page.
+   *
+   * Readymode's login page carries a standing footer reading "If you are not
+   * authorized to access Readymode Inc.'s software, please close this browser
+   * window/tab." Classified against the whole body, that boilerplate matched
+   * the permission-denied pattern, so every existing-session notice was read as
+   * a refusal and Continue was never pressed. The notice and the furniture
+   * around it are different things, and this is which is which.
+   */
+  noticeText?: string;
   buttons: InterstitialButton[];
   hasPasswordField: boolean;
   hasCaptcha: boolean;
@@ -139,6 +151,31 @@ function haystack(snapshot: InterstitialSnapshot): string {
   return `${snapshot.title}\n${snapshot.bodyText}`;
 }
 
+/**
+ * The text a refusal would be written in.
+ *
+ * Two narrowings, both because a page says more than it means.
+ *
+ * The notice's own region is preferred over the whole page, so a standing
+ * footer is not read as a statement about this attempt.
+ *
+ * And conditional sentences are dropped. "If you are not authorized, close this
+ * window" is a standing instruction to whoever might be reading; "You are not
+ * authorized" is the server refusing. Only the second is a refusal, and reading
+ * the first as one is what stopped every run at the login screen.
+ *
+ * Safety signals — a captcha, a destructive confirmation — are never narrowed
+ * this way. A conditional warning about deleting data is still a warning.
+ */
+function assertedText(snapshot: InterstitialSnapshot): string {
+  const source = snapshot.noticeText?.trim() ? snapshot.noticeText : snapshot.bodyText;
+
+  return `${snapshot.title}\n${source}`
+    .split(/(?<=[.!?])\s+|\n+/)
+    .filter((sentence) => !/^\s*(?:if|unless|should you|in case)\b/i.test(sentence))
+    .join(' ');
+}
+
 function visibleContinueButtons(snapshot: InterstitialSnapshot): InterstitialButton[] {
   return snapshot.buttons.filter((button) => button.visible && CONTINUE_LABEL.test(button.label));
 }
@@ -158,7 +195,10 @@ function verdict(
 }
 
 export function classifyInterstitial(snapshot: InterstitialSnapshot): InterstitialVerdict {
+  // Safety signals read everything on the page.
   const text = haystack(snapshot);
+  // Refusals read only what the page asserts about this attempt.
+  const asserted = assertedText(snapshot);
 
   // 1. Destructive confirmations, first: a Continue button next to "cannot be
   //    undone" is the most dangerous thing that could be misread as a takeover.
@@ -185,18 +225,18 @@ export function classifyInterstitial(snapshot: InterstitialSnapshot): Interstiti
     );
   }
 
-  if (PATTERNS.suspended.test(text)) {
+  if (PATTERNS.suspended.test(asserted)) {
     return verdict('account_suspended', ['suspended'], 'The Readymode account appears to be locked or suspended.');
   }
 
   if (
-    PATTERNS.passwordExpired.test(text) ||
+    PATTERNS.passwordExpired.test(asserted) ||
     (snapshot.hasPasswordField && /new password|confirm password/i.test(text))
   ) {
     return verdict('password_expired', ['password_expired'], 'Readymode is requiring a password change.');
   }
 
-  if (PATTERNS.noLicense.test(text)) {
+  if (PATTERNS.noLicense.test(asserted)) {
     return verdict(
       'no_admin_license',
       ['no_license'],
@@ -204,15 +244,15 @@ export function classifyInterstitial(snapshot: InterstitialSnapshot): Interstiti
     );
   }
 
-  if (PATTERNS.permission.test(text)) {
+  if (PATTERNS.permission.test(asserted)) {
     return verdict('permission_denied', ['permission'], 'Readymode refused access to this administrator.');
   }
 
-  if (PATTERNS.credentials.test(text)) {
+  if (PATTERNS.credentials.test(asserted)) {
     return verdict('credentials_rejected', ['credentials'], 'Readymode rejected the stored credentials.');
   }
 
-  if (PATTERNS.limitedAdmin.test(text)) {
+  if (PATTERNS.limitedAdmin.test(asserted)) {
     return verdict(
       'limited_admin_mode',
       ['limited_admin'],
@@ -227,7 +267,12 @@ export function classifyInterstitial(snapshot: InterstitialSnapshot): Interstiti
   if (takeoverMatches.length > 0) {
     // Re-check every disqualifying signal explicitly rather than relying on the
     // order of the cases above.
-    const blocking = NEGATIVE_SIGNALS.filter((signal) => signal.pattern.test(text)).map((signal) => signal.label);
+    const SAFETY_LABELS = new Set(['destructive', 'captcha', 'multi_factor']);
+    const blocking = NEGATIVE_SIGNALS.filter((signal) =>
+      // A captcha or a destructive warning counts wherever it appears. A
+      // refusal only counts where the page asserts it.
+      SAFETY_LABELS.has(signal.label) ? signal.pattern.test(text) : signal.pattern.test(asserted),
+    ).map((signal) => signal.label);
     if (blocking.length > 0) {
       return verdict(
         'unknown',
