@@ -2,12 +2,21 @@ import { config } from '../config';
 import { getStore } from '../database';
 import { recordEvent } from '../audit';
 import { jobQueue, laneKey } from '../queue';
-import { AmbiguousAgentError, AppError, AuthenticationRequiredError, NotFoundError } from '../security/errors';
+import {
+  AmbiguousAgentError,
+  AppError,
+  AuthenticationRequiredError,
+  ControlsUnverifiedError,
+  NotFoundError,
+} from '../security/errors';
 import { LinkedAgent, ReadymodeAgent, WorkflowResult } from '../types';
 import { Action, AgentTarget } from '../openai/schema';
 import { AgentMatch, describeAgent, describeMatchFailure, matchAgent } from './agents';
 import { applyStateOperation, diffStates, formatStates } from './states';
 import { ReadymodeSession, withSession } from './session';
+import { ALL_CONTROLS } from './selectors';
+import { discoveryReport } from './selectors/discovery';
+import { capabilityForAction } from './selectors/capabilities';
 import { WorkflowContext } from './workflows/harness';
 import { listAgents, openAgent, readAssignedStates } from './workflows/pageOperations';
 import {
@@ -148,9 +157,10 @@ export async function executeAction(
 
   return jobQueue.enqueue(key, context.requestId, async () => {
     try {
-      return await withSession(context.organizationId, (session) =>
-        dispatch(action, workflowContext(session, context), context),
-      );
+      return await withSession(context.organizationId, async (session) => {
+        await assertCapabilityVerified(action, session, context);
+        return dispatch(action, workflowContext(session, context), context);
+      });
     } catch (error) {
       if (error instanceof AuthenticationRequiredError) {
         jobQueue.pause(key, 'Readymode requires human verification.');
@@ -158,6 +168,45 @@ export async function executeAction(
       throw error;
     }
   });
+}
+
+
+/**
+ * Refuses, before touching anything, when the controls this action needs have
+ * not been observed in the real interface.
+ *
+ * Built-in candidate selectors are guesses. They are fine for reading, and they
+ * are how discovery finds its way around, but they must never be what clicks
+ * Save. This is the one place that decision is made, so it covers every action.
+ */
+async function assertCapabilityVerified(
+  action: Action,
+  session: ReadymodeSession,
+  context: ExecutionContext,
+): Promise<void> {
+  const capability = capabilityForAction(action.action);
+  if (!capability) return;
+
+  const involved = new Set([
+    ...capability.requiredControls,
+    ...(capability.anyOfControls?.flat() ?? []),
+  ]);
+  const controls = ALL_CONTROLS.filter((control) => involved.has(control.name));
+  if (controls.length === 0) return;
+
+  const report = await discoveryReport(session.page, controls, { timeoutMs: 600 });
+  const status = report.capabilities.find((entry) => entry.capability === capability.id);
+  if (!status || status.usable) return;
+
+  await recordEvent({
+    organizationId: context.organizationId,
+    requestId: context.requestId,
+    type: 'readymode.controls_unverified',
+    message: `${context.reference}: refused, because ReadySupport cannot verify how to ${capability.label}.`,
+    data: { capability: capability.id, missing: status.missing },
+  });
+
+  throw new ControlsUnverifiedError(capability.label, status.missing);
 }
 
 async function dispatch(

@@ -19,6 +19,8 @@ import {
   LOGIN_SUCCESS_CONDITIONS,
 } from './selectors';
 import { anyPresent, discover } from './selectors/discovery';
+import { handleInterstitial } from './takeover';
+import { bindProfile, loadProfile } from './selectors/resolve';
 
 /**
  * Readymode browser session management.
@@ -132,6 +134,8 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   const credentials = await resolveCredentials(session.organizationId);
   const { page } = session;
 
+  const expectedHost = hostOf(credentials.loginUrl);
+
   await page.goto(credentials.loginUrl, { waitUntil: 'domcontentloaded' });
 
   if (await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 1500)) return;
@@ -139,6 +143,14 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   if (await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 1000)) {
     await markAuthenticationRequired(session.organizationId, 'Human verification appeared at login.');
     throw new AuthenticationRequiredError();
+  }
+
+  // A persistent context can land straight on the administrator session notice
+  // without ever showing a login form.
+  const before = await handleInterstitial(session, expectedHost);
+  if (before.clicked && before.dashboardVerified) {
+    await markConnected(session.organizationId, credentials.loginUrl, credentials.username);
+    return;
   }
 
   const usernameField = await discover(page, LOGIN_CONTROLS.username);
@@ -160,15 +172,20 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
     throw new AuthenticationRequiredError();
   }
 
+  // The one notice ReadySupport may continue past: another administrator's
+  // session being replaced. Everything else is reported, never clicked.
+  const after = await handleInterstitial(session, expectedHost);
+
+  if (after.clicked && !after.dashboardVerified) {
+    throw new AppError(
+      'readymode_login_uncertain',
+      'ReadySupport continued past the administrator session notice but could not confirm the dashboard, so it stopped without making changes.',
+      503,
+    );
+  }
+
   if (await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 5000)) {
-    await getStore().upsertConnection({
-      organizationId: session.organizationId,
-      loginUrl: credentials.loginUrl,
-      username: credentials.username,
-      status: 'connected',
-      lastVerifiedAt: new Date().toISOString(),
-      lastError: null,
-    });
+    await markConnected(session.organizationId, credentials.loginUrl, credentials.username);
     return;
   }
 
@@ -186,11 +203,41 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
     );
   }
 
+  // A recognized notice explains the failure far better than a generic message.
+  if (after.classification !== 'unknown') {
+    await markAuthenticationRequired(session.organizationId, after.explanation);
+    throw new AuthenticationRequiredError(after.explanation);
+  }
+
   throw new AppError(
     'readymode_login_uncertain',
     'ReadySupport could not confirm that the Readymode login succeeded, so it stopped without making changes.',
     503,
   );
+}
+
+/** The host a notice must be on before ReadySupport will act on it. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
+
+async function markConnected(
+  organizationId: string,
+  loginUrl: string,
+  username: string,
+): Promise<void> {
+  await getStore().upsertConnection({
+    organizationId,
+    loginUrl,
+    username,
+    status: 'connected',
+    lastVerifiedAt: new Date().toISOString(),
+    lastError: null,
+  });
 }
 
 async function markAuthenticationRequired(organizationId: string, reason: string): Promise<void> {
@@ -236,6 +283,9 @@ export async function withSession<T>(
 ): Promise<T> {
   const session = await openSession(organizationId);
   try {
+    // Selectors that came from an approved discovery profile take precedence
+    // over the built-in guesses for everything this session does, login included.
+    bindProfile(session.page, await loadProfile(organizationId));
     await ensureAuthenticated(session);
     return await handler(session);
   } finally {

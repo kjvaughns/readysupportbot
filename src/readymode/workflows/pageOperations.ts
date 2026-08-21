@@ -9,6 +9,7 @@ import {
   STATE_CONTROLS,
 } from '../selectors';
 import { anyPresent, discover, tryDiscover } from '../selectors/discovery';
+import { allText } from '../selectors/frames';
 import { normalizeState, sortStates } from '../states';
 import { assertNoHumanVerification, navigate, WorkflowContext, waitForResult } from './harness';
 
@@ -26,9 +27,9 @@ export async function listAgents(context: WorkflowContext, query?: string): Prom
   await navigate(context, query ? `${ROUTES.agentSearch}${encodeURIComponent(query)}` : ROUTES.agents);
 
   const search = await tryDiscover(page, AGENT_CONTROLS.search, { timeoutMs: 1200 });
-  if (query && search.locator) {
-    await search.locator.fill(query);
-    await search.locator.press('Enter');
+  if (query && search.resolved) {
+    await search.resolved.locator.fill(query);
+    await search.resolved.locator.press('Enter');
     await page.waitForLoadState('networkidle').catch(() => undefined);
   }
 
@@ -92,7 +93,8 @@ export async function openAgent(context: WorkflowContext, agent: ReadymodeAgent)
   const confirmed = await waitForResult(
     page,
     async () => {
-      const content = sanitizePageValue(await page.innerText('body').catch(() => ''), 20000);
+      // Read every frame: the agent detail panel is not on the top-level page.
+      const content = sanitizePageValue(await allText(page), 20000);
       return content.toLowerCase().includes(String(identifier).toLowerCase());
     },
     { what: 'agent detail page', timeoutMs: 8000 },
@@ -115,15 +117,18 @@ export async function findStateControl(context: WorkflowContext): Promise<StateC
   const { page } = context.session;
 
   const select = await tryDiscover(page, STATE_CONTROLS.multiSelect, { timeoutMs: 1200 });
-  if (select.locator) return { kind: 'select', locator: select.locator };
+  if (select.resolved) return { kind: 'select', locator: select.resolved.locator };
 
   const checkboxes = await tryDiscover(page, STATE_CONTROLS.checkboxContainer, {
     timeoutMs: 1200,
     allowFirstOfMany: true,
   });
-  if (checkboxes.locator) {
+  if (checkboxes.resolved) {
     const section = await tryDiscover(page, STATE_CONTROLS.section, { timeoutMs: 1200 });
-    return { kind: 'checkboxes', locator: section.locator ?? checkboxes.locator };
+    return {
+      kind: 'checkboxes',
+      locator: section.resolved?.locator ?? checkboxes.resolved.locator,
+    };
   }
 
   // Neither shape was found. Stop rather than guess which control holds states.
@@ -237,7 +242,7 @@ export async function saveAgentForm(context: WorkflowContext): Promise<boolean> 
   const { page } = context.session;
 
   const save =
-    (await tryDiscover(page, STATE_CONTROLS.save, { timeoutMs: 1200 })).locator ??
+    (await tryDiscover(page, STATE_CONTROLS.save, { timeoutMs: 1200 })).resolved?.locator ??
     (await discover(page, AGENT_CONTROLS.saveButton));
 
   await save.click();
@@ -257,5 +262,5 @@ export async function reopenAgent(context: WorkflowContext, agent: ReadymodeAgen
 }
 
 export async function pageText(page: Page, limit = 20000): Promise<string> {
-  return sanitizePageValue(await page.innerText('body').catch(() => ''), limit);
+  return sanitizePageValue(await allText(page), limit);
 }

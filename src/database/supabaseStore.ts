@@ -14,9 +14,13 @@ import {
 } from '../types';
 import { AppError } from '../security/errors';
 import {
+  CreateInterfaceProfileInput,
   CreateRequestInput,
   DataStore,
+  InterfaceProfileRecord,
+  InterfaceProfileWithSelectors,
   ListRequestsFilter,
+  SelectorVersionRecord,
   StateConfigurationRecord,
   StoredCredentials,
 } from './store';
@@ -745,6 +749,229 @@ export class SupabaseStore implements DataStore {
       { onConflict: 'organization_id' },
     );
     if (error) this.fail('setDefaultStates', error);
+  }
+
+  // -- Readymode interface profiles ------------------------------------------
+
+  private toProfile(row: any): InterfaceProfileRecord {
+    return {
+      id: row.id,
+      organizationId: row.organization_id,
+      status: row.status,
+      schemaVersion: row.schema_version,
+      baseUrl: row.base_url,
+      interfaceVersion: row.interface_version,
+      pagesCaptured: row.pages_captured,
+      controlsTotal: row.controls_total,
+      controlsProposed: row.controls_proposed,
+      capabilities: row.capabilities ?? [],
+      unproposed: row.unproposed ?? [],
+      screenshotPaths: row.screenshot_paths ?? [],
+      discoveredBy: row.discovered_by,
+      discoveredAt: row.discovered_at,
+      approvedBy: row.approved_by,
+      approvedAt: row.approved_at,
+      supersededBy: row.superseded_by,
+      notes: row.notes,
+    };
+  }
+
+  private toSelector(row: any): SelectorVersionRecord {
+    return {
+      id: row.id,
+      profileId: row.profile_id,
+      organizationId: row.organization_id,
+      controlName: row.control_name,
+      strategy: row.strategy ?? {},
+      tier: row.tier,
+      confidence: row.confidence,
+      rootName: row.root_name,
+      rootUrl: row.root_url,
+      evidenceRef: row.evidence_ref ?? {},
+      verified: row.verified,
+      verifiedMatches: row.verified_matches,
+    };
+  }
+
+  /** Columns read for profile queries. Never `*`, so evidence cannot leak in. */
+  private static readonly PROFILE_COLUMNS =
+    'id, organization_id, status, schema_version, base_url, interface_version, pages_captured, ' +
+    'controls_total, controls_proposed, capabilities, unproposed, screenshot_paths, ' +
+    'discovered_by, discovered_at, approved_by, approved_at, superseded_by, notes';
+
+  private async selectorsFor(profileId: string): Promise<SelectorVersionRecord[]> {
+    const { data, error } = await this.client
+      .from('readymode_selector_versions')
+      .select('*')
+      .eq('profile_id', profileId);
+    if (error) this.fail('selectorsFor', error);
+    return (data ?? []).map((row) => this.toSelector(row));
+  }
+
+  async createInterfaceProfile(
+    input: CreateInterfaceProfileInput,
+  ): Promise<InterfaceProfileWithSelectors> {
+    const { data, error } = await this.client
+      .from('readymode_interface_profiles')
+      .insert({
+        organization_id: input.profile.organizationId,
+        status: 'proposed',
+        schema_version: input.profile.schemaVersion,
+        base_url: input.profile.baseUrl,
+        interface_version: input.profile.interfaceVersion,
+        pages_captured: input.profile.pagesCaptured,
+        controls_total: input.profile.controlsTotal,
+        controls_proposed: input.profile.controlsProposed,
+        capabilities: input.profile.capabilities,
+        unproposed: input.profile.unproposed,
+        screenshot_paths: input.profile.screenshotPaths,
+        discovered_by: input.profile.discoveredBy,
+        discovered_at: input.profile.discoveredAt,
+        notes: input.profile.notes,
+      })
+      .select(SupabaseStore.PROFILE_COLUMNS)
+      .single();
+    if (error) this.fail('createInterfaceProfile', error);
+
+    const profile = this.toProfile(data);
+
+    try {
+      if (input.selectors.length > 0) {
+        const { error: selectorError } = await this.client.from('readymode_selector_versions').insert(
+          input.selectors.map((selector) => ({
+            profile_id: profile.id,
+            organization_id: selector.organizationId,
+            control_name: selector.controlName,
+            strategy: selector.strategy,
+            tier: selector.tier,
+            confidence: selector.confidence,
+            root_name: selector.rootName,
+            root_url: selector.rootUrl,
+            evidence_ref: selector.evidenceRef,
+            verified: selector.verified,
+            verified_matches: selector.verifiedMatches,
+          })),
+        );
+        if (selectorError) this.fail('createInterfaceProfile.selectors', selectorError);
+      }
+
+      const evidenceJson = JSON.stringify(input.evidence ?? {});
+      const { error: evidenceError } = await this.client.from('readymode_interface_evidence').insert({
+        profile_id: profile.id,
+        organization_id: profile.organizationId,
+        evidence: input.evidence ?? {},
+        byte_size: evidenceJson.length,
+      });
+      if (evidenceError) this.fail('createInterfaceProfile.evidence', evidenceError);
+    } catch (failure) {
+      // A profile with no selectors would read as "nothing was found", which is
+      // a different and misleading claim. Remove it rather than leave it.
+      await this.client.from('readymode_interface_profiles').delete().eq('id', profile.id);
+      throw failure;
+    }
+
+    return { ...profile, selectors: await this.selectorsFor(profile.id) };
+  }
+
+  async getInterfaceProfile(profileId: string): Promise<InterfaceProfileWithSelectors | null> {
+    const { data, error } = await this.client
+      .from('readymode_interface_profiles')
+      .select(SupabaseStore.PROFILE_COLUMNS)
+      .eq('id', profileId)
+      .maybeSingle();
+    if (error) this.fail('getInterfaceProfile', error);
+    if (!data) return null;
+
+    const profile = this.toProfile(data);
+    return { ...profile, selectors: await this.selectorsFor(profile.id) };
+  }
+
+  async getActiveInterfaceProfile(
+    organizationId: string,
+  ): Promise<InterfaceProfileWithSelectors | null> {
+    const { data, error } = await this.client
+      .from('readymode_interface_profiles')
+      .select(SupabaseStore.PROFILE_COLUMNS)
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (error) this.fail('getActiveInterfaceProfile', error);
+    if (!data) return null;
+
+    const profile = this.toProfile(data);
+    return { ...profile, selectors: await this.selectorsFor(profile.id) };
+  }
+
+  async listInterfaceProfiles(
+    organizationId: string,
+    limit: number,
+  ): Promise<InterfaceProfileRecord[]> {
+    const { data, error } = await this.client
+      .from('readymode_interface_profiles')
+      .select(SupabaseStore.PROFILE_COLUMNS)
+      .eq('organization_id', organizationId)
+      .order('discovered_at', { ascending: false })
+      .limit(limit);
+    if (error) this.fail('listInterfaceProfiles', error);
+    return (data ?? []).map((row) => this.toProfile(row));
+  }
+
+  async approveInterfaceProfile(input: {
+    organizationId: string;
+    profileId: string;
+    approvedBy: string;
+  }): Promise<InterfaceProfileWithSelectors> {
+    // Demote first. The partial unique index makes a concurrent double approval
+    // fail loudly instead of quietly leaving two active profiles.
+    const { error: demoteError } = await this.client
+      .from('readymode_interface_profiles')
+      .update({ status: 'superseded', superseded_by: input.profileId })
+      .eq('organization_id', input.organizationId)
+      .eq('status', 'active')
+      .neq('id', input.profileId);
+    if (demoteError) this.fail('approveInterfaceProfile.demote', demoteError);
+
+    const { data, error } = await this.client
+      .from('readymode_interface_profiles')
+      .update({
+        status: 'active',
+        approved_by: input.approvedBy,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', input.profileId)
+      .eq('organization_id', input.organizationId)
+      .select(SupabaseStore.PROFILE_COLUMNS)
+      .single();
+    if (error) this.fail('approveInterfaceProfile', error);
+
+    const profile = this.toProfile(data);
+    return { ...profile, selectors: await this.selectorsFor(profile.id) };
+  }
+
+  async rejectInterfaceProfile(input: {
+    organizationId: string;
+    profileId: string;
+    notes?: string;
+  }): Promise<InterfaceProfileRecord> {
+    const { data, error } = await this.client
+      .from('readymode_interface_profiles')
+      .update({ status: 'rejected', notes: input.notes ?? null })
+      .eq('id', input.profileId)
+      .eq('organization_id', input.organizationId)
+      .select(SupabaseStore.PROFILE_COLUMNS)
+      .single();
+    if (error) this.fail('rejectInterfaceProfile', error);
+    return this.toProfile(data);
+  }
+
+  async getInterfaceEvidence(profileId: string): Promise<unknown | null> {
+    const { data, error } = await this.client
+      .from('readymode_interface_evidence')
+      .select('evidence')
+      .eq('profile_id', profileId)
+      .maybeSingle();
+    if (error) this.fail('getInterfaceEvidence', error);
+    return data?.evidence ?? null;
   }
 
   // -- Settings -------------------------------------------------------------

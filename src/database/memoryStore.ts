@@ -13,9 +13,13 @@ import {
 } from '../types';
 import { newReference } from '../security/ids';
 import {
+  CreateInterfaceProfileInput,
   CreateRequestInput,
   DataStore,
+  InterfaceProfileRecord,
+  InterfaceProfileWithSelectors,
   ListRequestsFilter,
+  SelectorVersionRecord,
   StateConfigurationRecord,
   StoredCredentials,
 } from './store';
@@ -42,6 +46,9 @@ export class MemoryStore implements DataStore {
   stateConfigurations: StateConfigurationRecord[] = [];
   defaultStates = new Map<string, string[]>();
   settings = new Map<string, unknown>();
+  interfaceProfiles: InterfaceProfileRecord[] = [];
+  selectorVersions: SelectorVersionRecord[] = [];
+  interfaceEvidence = new Map<string, unknown>();
 
   private now(): string {
     return new Date().toISOString();
@@ -62,6 +69,9 @@ export class MemoryStore implements DataStore {
     this.stateConfigurations = [];
     this.defaultStates.clear();
     this.settings.clear();
+    this.interfaceProfiles = [];
+    this.selectorVersions = [];
+    this.interfaceEvidence.clear();
   }
 
   async getOrganization(organizationId: string): Promise<Organization | null> {
@@ -428,6 +438,107 @@ export class MemoryStore implements DataStore {
 
   async setDefaultStates(organizationId: string, states: string[]): Promise<void> {
     this.defaultStates.set(organizationId, states);
+  }
+
+  // -- Readymode interface profiles ------------------------------------------
+
+  private withSelectors(profile: InterfaceProfileRecord): InterfaceProfileWithSelectors {
+    return {
+      ...profile,
+      selectors: this.selectorVersions.filter((entry) => entry.profileId === profile.id),
+    };
+  }
+
+  async createInterfaceProfile(
+    input: CreateInterfaceProfileInput,
+  ): Promise<InterfaceProfileWithSelectors> {
+    const profile: InterfaceProfileRecord = {
+      id: randomUUID(),
+      status: 'proposed',
+      approvedBy: null,
+      approvedAt: null,
+      supersededBy: null,
+      ...input.profile,
+    };
+    this.interfaceProfiles.push(profile);
+
+    for (const selector of input.selectors) {
+      this.selectorVersions.push({ id: randomUUID(), profileId: profile.id, ...selector });
+    }
+    this.interfaceEvidence.set(profile.id, input.evidence);
+
+    return this.withSelectors(profile);
+  }
+
+  async getInterfaceProfile(profileId: string): Promise<InterfaceProfileWithSelectors | null> {
+    const profile = this.interfaceProfiles.find((entry) => entry.id === profileId);
+    return profile ? this.withSelectors(profile) : null;
+  }
+
+  async getActiveInterfaceProfile(
+    organizationId: string,
+  ): Promise<InterfaceProfileWithSelectors | null> {
+    const profile = this.interfaceProfiles.find(
+      (entry) => entry.organizationId === organizationId && entry.status === 'active',
+    );
+    return profile ? this.withSelectors(profile) : null;
+  }
+
+  async listInterfaceProfiles(
+    organizationId: string,
+    limit: number,
+  ): Promise<InterfaceProfileRecord[]> {
+    return this.interfaceProfiles
+      .filter((entry) => entry.organizationId === organizationId)
+      .sort((a, b) => b.discoveredAt.localeCompare(a.discoveredAt))
+      .slice(0, limit);
+  }
+
+  async approveInterfaceProfile(input: {
+    organizationId: string;
+    profileId: string;
+    approvedBy: string;
+  }): Promise<InterfaceProfileWithSelectors> {
+    const profile = this.interfaceProfiles.find(
+      (entry) => entry.id === input.profileId && entry.organizationId === input.organizationId,
+    );
+    if (!profile) throw new Error(`Unknown interface profile ${input.profileId}`);
+
+    // Exactly one active profile per organization, matching the partial unique
+    // index the migration declares.
+    for (const other of this.interfaceProfiles) {
+      if (
+        other.organizationId === input.organizationId &&
+        other.status === 'active' &&
+        other.id !== profile.id
+      ) {
+        other.status = 'superseded';
+        other.supersededBy = profile.id;
+      }
+    }
+
+    profile.status = 'active';
+    profile.approvedBy = input.approvedBy;
+    profile.approvedAt = this.now();
+    return this.withSelectors(profile);
+  }
+
+  async rejectInterfaceProfile(input: {
+    organizationId: string;
+    profileId: string;
+    notes?: string;
+  }): Promise<InterfaceProfileRecord> {
+    const profile = this.interfaceProfiles.find(
+      (entry) => entry.id === input.profileId && entry.organizationId === input.organizationId,
+    );
+    if (!profile) throw new Error(`Unknown interface profile ${input.profileId}`);
+    profile.status = 'rejected';
+    profile.notes = input.notes ?? profile.notes;
+    return profile;
+  }
+
+  async getInterfaceEvidence(profileId: string): Promise<unknown | null> {
+    return this.interfaceEvidence.get(profileId) ?? null;
   }
 
   async getSetting<T = unknown>(organizationId: string, key: string): Promise<T | null> {

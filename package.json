@@ -2,7 +2,7 @@
   "name": "readysupport-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "ReadySupport — Discord bot and backend for approved administrative automation inside Readymode.",
+  "description": "ReadySupport \u2014 Discord bot and backend for approved administrative automation inside Readymode.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "engines": {
@@ -17,7 +17,9 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "register:commands": "tsx src/discord/registerCommands.ts"
+    "register:commands": "tsx src/discord/registerCommands.ts",
+    "selectors:apply": "tsx scripts/applySelectors.ts",
+    "selectors:check": "tsx scripts/applySelectors.ts --check"
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.6.0",

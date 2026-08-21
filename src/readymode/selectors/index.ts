@@ -212,6 +212,30 @@ export const LICENSE_CONTROLS = {
   ]),
 } as const;
 
+
+/**
+ * The Continue button on Readymode's "another administrator is signed in"
+ * notice.
+ *
+ * Deliberately NOT part of ALL_CONTROLS: it is not a capability, and it must not
+ * change the control counts the connection test reports.
+ */
+export const TAKEOVER_CONTROLS = {
+  continue: control(
+    'takeover.continue',
+    'Continue button on the administrator session notice',
+    [
+      {
+        type: 'role',
+        role: 'button',
+        name: /^\s*(?:continue|proceed|take\s?over|continue\s+anyway|yes,?\s*continue)\s*$/i,
+      },
+      { type: 'css', value: 'input[type="submit"][value="Continue" i]' },
+      { type: 'css', value: 'input[type="button"][value="Continue" i]' },
+    ],
+  ),
+} as const;
+
 /** Every control, used by the discovery report. */
 export const ALL_CONTROLS: ControlDefinition[] = [
   ...Object.values(LOGIN_CONTROLS),

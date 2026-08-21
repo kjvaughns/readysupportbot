@@ -34,7 +34,13 @@ export type AuditEventType =
   | 'browser.session_started'
   | 'browser.session_ended'
   | 'workflow.needs_configuration'
-  | 'prompt_injection.blocked';
+  | 'prompt_injection.blocked'
+  | 'readymode.session_takeover'
+  | 'readymode.interface_discovered'
+  | 'readymode.profile_approved'
+  | 'readymode.profile_rejected'
+  | 'readymode.evidence_read'
+  | 'readymode.controls_unverified';
 
 export interface AuditInput {
   organizationId: string;

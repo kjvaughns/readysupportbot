@@ -14,7 +14,9 @@ import {
 import { openSession, ensureAuthenticated } from '../../readymode/session';
 import { ALL_CONTROLS } from '../../readymode/selectors';
 import { discoveryReport } from '../../readymode/selectors/discovery';
-import { toSafeMessage } from '../../security/errors';
+import { bindProfile, invalidateProfileCache, loadProfile } from '../../readymode/selectors/resolve';
+import { runDiscovery } from '../../readymode/discovery';
+import { NotFoundError, ValidationError, toSafeMessage } from '../../security/errors';
 import { config } from '../../config';
 
 /**
@@ -115,8 +117,9 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Signs in and reports which Readymode controls ReadySupport can identify.
-   * Read-only: it never changes anything in Readymode.
+   * Signs in and reports, per capability, what ReadySupport can actually do.
+   *
+   * Read-only. It changes nothing in Readymode.
    */
   app.post('/readymode/test', async (request) => {
     const context = await requireRole(request, ['owner', 'administrator']);
@@ -130,25 +133,40 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
+      bindProfile(session.page, await loadProfile(context.organizationId));
       await ensureAuthenticated(session);
+
       const report = await discoveryReport(session.page, ALL_CONTROLS);
+      const profile = await getStore().getActiveInterfaceProfile(context.organizationId);
+      const unusable = report.capabilities.filter((capability) => !capability.usable);
 
       await recordEvent({
         organizationId: context.organizationId,
         type: 'connection.tested',
         message: 'The Readymode connection was tested.',
-        data: { resolved: report.resolved.length, unresolved: report.unresolved.length },
+        data: {
+          resolved: report.resolved.length,
+          unresolved: report.unresolved.length,
+          unusableCapabilities: unusable.map((capability) => capability.capability),
+        },
       });
 
       return {
-        ok: report.unresolved.length === 0,
+        ok: unusable.length === 0,
         signedIn: true,
+        dryRun: config.dryRun,
+        profile: profile
+          ? { id: profile.id, status: profile.status, approvedAt: profile.approvedAt }
+          : null,
+        // Where the report looked. A control can only be found on the page it
+        // lives on, so this is essential context for reading the result.
+        pageUrl: session.page.url(),
+        frames: report.roots,
+        capabilities: report.capabilities,
+        controls: report.controls,
         resolved: report.resolved,
         unresolved: report.unresolved,
-        message:
-          report.unresolved.length === 0
-            ? 'Signed in and every required control was identified.'
-            : `Signed in, but these controls need configuration: ${report.unresolved.join(', ')}.`,
+        message: buildTestMessage(profile !== null, unusable),
       };
     } catch (error) {
       await recordEvent({
@@ -161,6 +179,196 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       await session.close().catch(() => undefined);
     }
+  });
+
+  /**
+   * Read-only inspection of the real interface.
+   *
+   * Walks the interface, records what is there, and proposes selectors the
+   * evidence can justify. It never clicks save, submits a form, or changes
+   * anything. The result is stored as a proposal for an Owner to approve.
+   */
+  app.post('/readymode/discover', async (request) => {
+    const context = await requireRole(request, ['owner']);
+    const body = z
+      .object({ maxStops: z.coerce.number().int().min(1).max(20).optional() })
+      .parse(request.body ?? {});
+
+    const session = await openSession(context.organizationId).catch(() => null);
+    if (!session) {
+      return {
+        ok: false,
+        message: 'A browser session could not be started. Check the Browserbase configuration.',
+      };
+    }
+
+    try {
+      const result = await runDiscovery({
+        session,
+        organizationId: context.organizationId,
+        discoveredBy: context.user.id,
+        maxStops: body.maxStops,
+      });
+
+      return {
+        ok: true,
+        profile: {
+          id: result.profile.id,
+          status: result.profile.status,
+          interfaceVersion: result.profile.interfaceVersion,
+          pagesCaptured: result.profile.pagesCaptured,
+          controlsTotal: result.profile.controlsTotal,
+          controlsProposed: result.profile.controlsProposed,
+        },
+        visited: result.visited,
+        skipped: result.skipped,
+        // Proposals carry no raw evidence — only what justifies each one.
+        proposals: result.proposals.map((proposal) => ({
+          control: proposal.control,
+          tier: proposal.tier,
+          confidence: proposal.confidence,
+          page: proposal.pageStep,
+          frame: proposal.rootName,
+          evidence: proposal.evidence,
+        })),
+        unproposed: result.unproposed,
+        redactions: result.evidenceSummary,
+        message:
+          `Captured ${result.evidenceSummary.pages} page(s) and proposed ${result.profile.controlsProposed} ` +
+          `of ${result.profile.controlsTotal} controls. Nothing in Readymode was changed. ` +
+          `An Owner must approve this profile before the selectors are used.`,
+      };
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  });
+
+  /** Discovery profiles, newest first. Metadata only. */
+  app.get('/readymode/profiles', async (request) => {
+    const context = await requireAccess(request, 'view_activity');
+    const profiles = await getStore().listInterfaceProfiles(context.organizationId, 20);
+    return { profiles };
+  });
+
+  app.get('/readymode/profiles/:id', async (request) => {
+    const context = await requireAccess(request, 'view_activity');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params ?? {});
+
+    const profile = await getStore().getInterfaceProfile(params.id);
+    if (!profile || profile.organizationId !== context.organizationId) {
+      throw new NotFoundError('No such discovery profile.');
+    }
+    return { profile };
+  });
+
+  /** The raw evidence. Owner-only, and every read is audited. */
+  app.get('/readymode/profiles/:id/evidence', async (request) => {
+    const context = await requireRole(request, ['owner']);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params ?? {});
+
+    const profile = await getStore().getInterfaceProfile(params.id);
+    if (!profile || profile.organizationId !== context.organizationId) {
+      throw new NotFoundError('No such discovery profile.');
+    }
+
+    await recordEvent({
+      organizationId: context.organizationId,
+      type: 'readymode.evidence_read',
+      message: 'Raw interface evidence was read.',
+      data: { profileId: params.id },
+    });
+
+    return { evidence: await getStore().getInterfaceEvidence(params.id) };
+  });
+
+  /** Promotes a proposed profile to active. Owner-only. */
+  app.post('/readymode/profiles/:id/approve', async (request) => {
+    const context = await requireRole(request, ['owner']);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params ?? {});
+
+    const profile = await getStore().getInterfaceProfile(params.id);
+    if (!profile || profile.organizationId !== context.organizationId) {
+      throw new NotFoundError('No such discovery profile.');
+    }
+
+    const usable = profile.selectors.filter((selector) => selector.verified);
+    if (usable.length === 0) {
+      // Approving a profile that identified nothing would create the appearance
+      // of a verified interface while changing nothing.
+      throw new ValidationError(
+        'This profile did not identify any control uniquely, so approving it would not make any capability usable. Run discovery again.',
+      );
+    }
+
+    const approved = await getStore().approveInterfaceProfile({
+      organizationId: context.organizationId,
+      profileId: params.id,
+      approvedBy: context.user.id,
+    });
+    invalidateProfileCache(context.organizationId);
+
+    await recordEvent({
+      organizationId: context.organizationId,
+      type: 'readymode.profile_approved',
+      message: `Interface profile approved with ${usable.length} verified control(s).`,
+      data: { profileId: params.id, verified: usable.length },
+    });
+
+    return { profile: approved };
+  });
+
+  app.post('/readymode/profiles/:id/reject', async (request) => {
+    const context = await requireRole(request, ['owner']);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params ?? {});
+    const body = z.object({ notes: z.string().max(500).optional() }).parse(request.body ?? {});
+
+    const profile = await getStore().getInterfaceProfile(params.id);
+    if (!profile || profile.organizationId !== context.organizationId) {
+      throw new NotFoundError('No such discovery profile.');
+    }
+
+    const rejected = await getStore().rejectInterfaceProfile({
+      organizationId: context.organizationId,
+      profileId: params.id,
+      notes: body.notes,
+    });
+    invalidateProfileCache(context.organizationId);
+
+    await recordEvent({
+      organizationId: context.organizationId,
+      type: 'readymode.profile_rejected',
+      message: 'Interface profile rejected.',
+      data: { profileId: params.id },
+    });
+
+    return { profile: rejected };
+  });
+
+  /** The exact JSON `npm run selectors:apply` consumes. */
+  app.get('/readymode/profiles/:id/report', async (request) => {
+    const context = await requireRole(request, ['owner']);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params ?? {});
+
+    const profile = await getStore().getInterfaceProfile(params.id);
+    if (!profile || profile.organizationId !== context.organizationId) {
+      throw new NotFoundError('No such discovery profile.');
+    }
+
+    return {
+      reportId: profile.id,
+      capturedAt: profile.discoveredAt,
+      host: profile.baseUrl,
+      interfaceVersion: profile.interfaceVersion,
+      selectors: profile.selectors.map((selector) => ({
+        control: selector.controlName,
+        strategy: selector.strategy,
+        tier: selector.tier,
+        confidence: selector.confidence,
+        rootName: selector.rootName,
+        rootUrl: selector.rootUrl,
+        verified: selector.verified,
+      })),
+    };
   });
 
   /** Only an Owner may delete stored credentials. */
@@ -189,4 +397,18 @@ async function attemptConnection(
   } finally {
     await session.close().catch(() => undefined);
   }
+}
+
+function buildTestMessage(
+  hasProfile: boolean,
+  unusable: Array<{ label: string; missing: string[] }>,
+): string {
+  if (unusable.length === 0) {
+    return 'Signed in, and every capability has controls verified against the real interface.';
+  }
+
+  const list = unusable.map((capability) => capability.label).join('; ');
+  return hasProfile
+    ? `Signed in. These capabilities are not usable yet: ${list}. Run interface discovery again to cover them.`
+    : `Signed in, but no discovery profile has been approved, so no change can be made yet. Not usable: ${list}. An Owner should run POST /api/readymode/discover and approve the result.`;
 }

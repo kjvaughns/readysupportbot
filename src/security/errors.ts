@@ -91,6 +91,25 @@ export class WorkflowNeedsConfigurationError extends AppError {
   }
 }
 
+/**
+ * Raised before any browser work when the controls a change needs have not been
+ * observed in the real Readymode interface. ReadySupport refuses and explains
+ * rather than driving a page it has only guessed at.
+ */
+export class ControlsUnverifiedError extends AppError {
+  constructor(capability: string, missing: string[]) {
+    super(
+      'readymode_controls_unverified',
+      `ReadySupport has not verified the Readymode controls needed to ${capability}, so nothing was changed. ` +
+        `Not yet verified: ${missing.join(', ')}. An Owner can run interface discovery ` +
+        `(POST /api/readymode/discover) and approve the resulting profile.`,
+      503,
+      { capability, missing },
+    );
+    this.name = 'ControlsUnverifiedError';
+  }
+}
+
 export class AmbiguousAgentError extends AppError {
   constructor(
     readonly candidates: Array<{ readymodeUserId: string; username: string; fullName?: string | null }>,

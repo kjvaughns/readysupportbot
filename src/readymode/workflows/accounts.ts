@@ -1,10 +1,11 @@
 import { ReadymodeAgent } from '../../types';
-import { AppError } from '../../security/errors';
+import { AppError, WorkflowNeedsConfigurationError } from '../../security/errors';
 import { sanitizePageValue } from '../../security/sanitize';
 import { NewAccount } from '../../openai/schema';
 import { describeAgent } from '../agents';
 import { AGENT_CONTROLS, LICENSE_CONTROLS, ROUTES } from '../selectors';
 import { discover, tryDiscover } from '../selectors/discovery';
+import { listSearchRoots } from '../selectors/frames';
 import { WorkflowContext, WorkflowDefinition, navigate, runWorkflow, step, waitForResult } from './harness';
 import { listAgents, openAgent, pageText, saveAgentForm } from './pageOperations';
 
@@ -57,9 +58,11 @@ export const createAccountWorkflow: WorkflowDefinition<CreateAccountInput, Creat
     const createButton = await discover(page, AGENT_CONTROLS.createButton);
     await createButton.click();
 
-    await fillIfPresent(context, /full name|name/i, input.account.fullName);
-    await fillIfPresent(context, /user\s*name|login/i, username);
-    if (input.account.email) await fillIfPresent(context, /email/i, input.account.email);
+    await fillField(context, /full name|name/i, input.account.fullName, { required: true });
+    await fillField(context, /user\s*name|login/i, username, { required: true });
+    if (input.account.email) {
+      await fillField(context, /email/i, input.account.email, { required: false });
+    }
 
     const saved = await step(context, 'save', () => saveAgentForm(context));
     if (!saved) {
@@ -240,7 +243,7 @@ export const agentStatusWorkflow: WorkflowDefinition<
       timeoutMs: 800,
       allowFirstOfMany: true,
     });
-    const loggedIn = agent.loggedIn ?? Boolean(indicator.locator);
+    const loggedIn = agent.loggedIn ?? Boolean(indicator.resolved);
 
     return {
       verified: true,
@@ -277,14 +280,41 @@ export const licenseUsageWorkflow: WorkflowDefinition<
   },
 };
 
-async function fillIfPresent(
+/**
+ * Fills a labelled field, looking across the page and every frame.
+ *
+ * This used to search the top-level page only and silently do nothing when the
+ * field was not found, which in a frame-based interface meant creating an
+ * account with blank fields and reporting success. A required field that cannot
+ * be filled is now a hard stop.
+ */
+async function fillField(
   context: WorkflowContext,
   label: RegExp,
   value: string,
+  options: { required: boolean },
 ): Promise<void> {
-  const field = context.session.page.getByLabel(label);
-  const count = await field.count().catch(() => 0);
-  if (count === 1) await field.fill(value);
+  for (const root of listSearchRoots(context.session.page)) {
+    let field;
+    try {
+      field = root.getByLabel(label);
+    } catch {
+      continue;
+    }
+
+    const count = await field.count().catch(() => 0);
+    if (count !== 1) continue;
+    if (!(await field.isVisible().catch(() => false))) continue;
+
+    await field.fill(value);
+    return;
+  }
+
+  if (options.required) {
+    throw new WorkflowNeedsConfigurationError(
+      `field matching ${String(label)} on the new agent form`,
+    );
+  }
 }
 
 /** Deterministic username suggestion when the request does not supply one. */

@@ -52,6 +52,60 @@ export interface ListRequestsFilter {
   statuses?: RequestStatus[];
 }
 
+
+export type InterfaceProfileStatus = 'proposed' | 'active' | 'superseded' | 'rejected';
+
+export interface SelectorVersionRecord {
+  id: string;
+  profileId: string;
+  organizationId: string;
+  controlName: string;
+  /** Serialized SelectorStrategy. Rehydrated and validated on read. */
+  strategy: Record<string, unknown>;
+  tier: string;
+  confidence: number;
+  rootName: string;
+  rootUrl: string;
+  evidenceRef: Record<string, unknown>;
+  verified: boolean;
+  verifiedMatches: number;
+}
+
+export interface InterfaceProfileRecord {
+  id: string;
+  organizationId: string;
+  status: InterfaceProfileStatus;
+  schemaVersion: number;
+  baseUrl: string;
+  interfaceVersion: 'starter' | 'iq' | 'unknown';
+  pagesCaptured: number;
+  controlsTotal: number;
+  controlsProposed: number;
+  capabilities: unknown[];
+  unproposed: unknown[];
+  screenshotPaths: string[];
+  discoveredBy: string | null;
+  discoveredAt: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  supersededBy: string | null;
+  notes: string | null;
+}
+
+export interface InterfaceProfileWithSelectors extends InterfaceProfileRecord {
+  selectors: SelectorVersionRecord[];
+}
+
+export interface CreateInterfaceProfileInput {
+  profile: Omit<
+    InterfaceProfileRecord,
+    'id' | 'status' | 'approvedBy' | 'approvedAt' | 'supersededBy'
+  >;
+  selectors: Array<Omit<SelectorVersionRecord, 'id' | 'profileId'>>;
+  /** Raw evidence. Stored apart so it is never readable from the frontend. */
+  evidence: unknown;
+}
+
 /**
  * Everything the backend persists. Two implementations exist: Supabase for
  * real deployments, and an in-memory store used in tests and while the service
@@ -145,6 +199,23 @@ export interface DataStore {
   ): Promise<StateConfigurationRecord>;
   getDefaultStates(organizationId: string): Promise<string[]>;
   setDefaultStates(organizationId: string, states: string[], updatedBy?: string | null): Promise<void>;
+
+  // Readymode interface profiles ---------------------------------------------
+  createInterfaceProfile(input: CreateInterfaceProfileInput): Promise<InterfaceProfileWithSelectors>;
+  getInterfaceProfile(profileId: string): Promise<InterfaceProfileWithSelectors | null>;
+  getActiveInterfaceProfile(organizationId: string): Promise<InterfaceProfileWithSelectors | null>;
+  listInterfaceProfiles(organizationId: string, limit: number): Promise<InterfaceProfileRecord[]>;
+  approveInterfaceProfile(input: {
+    organizationId: string;
+    profileId: string;
+    approvedBy: string;
+  }): Promise<InterfaceProfileWithSelectors>;
+  rejectInterfaceProfile(input: {
+    organizationId: string;
+    profileId: string;
+    notes?: string;
+  }): Promise<InterfaceProfileRecord>;
+  getInterfaceEvidence(profileId: string): Promise<unknown | null>;
 
   // Settings ----------------------------------------------------------------
   getSetting<T = unknown>(organizationId: string, key: string): Promise<T | null>;
