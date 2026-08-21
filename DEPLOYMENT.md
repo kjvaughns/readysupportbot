@@ -251,9 +251,26 @@ npm run knowledge:seed   # no network; stores the supplied bank
 npm run knowledge:sync   # fetches and parses the real Help Center articles
 ```
 
-The npm scripts need `tsx`, which the production image does not carry, so on
-Railway use the endpoint instead — the same reasoning as slash command
-registration, which is also exposed for deployments with no shell:
+### From the Railway container shell
+
+The npm scripts need `tsx`, which the production image does not carry, so the
+same commands are compiled into `dist/`:
+
+```bash
+node dist/cli/knowledge.js status   # what has actually been read
+node dist/cli/knowledge.js seed     # store the supplied bank; no network
+node dist/cli/knowledge.js sync     # seed, then fetch the real articles
+node dist/cli/knowledge.js sync 60  # ...with a smaller article budget
+```
+
+They read the same environment the service does, so no arguments beyond the
+command are needed. If `status` reports that the bank file could not be read,
+the image predates the fix that ships `data/` — redeploy and try again.
+
+### Over HTTP
+
+For deployments with no shell, the same work is an Owner-only endpoint — the
+same reasoning as slash command registration:
 
 ```bash
 # Seed only: stores the supplied bank, no network.
