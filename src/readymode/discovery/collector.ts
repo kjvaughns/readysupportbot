@@ -177,19 +177,53 @@ export function collectFromRoot({ caps, stableAttributes }: CollectorOptions): C
   });
 
   // -- selects ---------------------------------------------------------------
+  //
+  // A dropdown's options are usually a controlled vocabulary — states, queue
+  // types, time zones — and knowing them is how a workflow finds the right one
+  // to choose. But some dropdowns list people: an owner picker, an agent
+  // assignment. Those options are personal data, and no pattern can tell a
+  // person's name from a campaign's.
+  //
+  // So the control has to say what it lists. Options are captured only when the
+  // field's own identity names a configuration vocabulary; otherwise the count
+  // is kept and the labels are withheld, which is recorded rather than silent.
+  const CONFIGURATION_VOCABULARY =
+    /state|territor|region|campaign|queue|playlist|type|status|mode|strategy|time\s*zone|timezone|disposition|ringtone|config|priority|folder|role|permission|language|country|hour|minute|day|month/i;
+
   const selectNodes = Array.from(document.querySelectorAll('select'));
   note('selects', selectNodes.length, caps.maxSelects);
   const selects = cap(selectNodes, caps.maxSelects).map((element, index) => {
     const options = Array.from((element as HTMLSelectElement).options);
-    return {
+    const identity = [
+      element.getAttribute('id') ?? '',
+      element.getAttribute('name') ?? '',
+      element.getAttribute('aria-label') ?? '',
+      labelFor(element as Element),
+    ].join(' ');
+
+    const listsConfiguration = CONFIGURATION_VOCABULARY.test(identity);
+
+    const record: CollectorOutput['selects'][number] = {
       ...base(element as Element, index + 1),
       multiple: (element as HTMLSelectElement).multiple === true,
       ariaLabel: (element as Element).getAttribute('aria-label') ?? undefined,
       labelText: labelFor(element as Element),
       optionCount: options.length,
-      optionLabels: options.slice(0, caps.maxOptionsPerSelect).map((option) => text(option.textContent)),
-      optionValues: options.slice(0, caps.maxOptionsPerSelect).map((option) => (option.getAttribute('value') ?? '').slice(0, 60)),
+      optionLabels: [],
+      optionValues: [],
+      optionsWithheld: !listsConfiguration,
     };
+
+    if (listsConfiguration) {
+      record.optionLabels = options
+        .slice(0, caps.maxOptionsPerSelect)
+        .map((option) => text(option.textContent));
+      record.optionValues = options
+        .slice(0, caps.maxOptionsPerSelect)
+        .map((option) => (option.getAttribute('value') ?? '').slice(0, 60));
+    }
+
+    return record;
   });
 
   // -- checkboxes ------------------------------------------------------------

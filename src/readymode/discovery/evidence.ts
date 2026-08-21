@@ -83,9 +83,16 @@ export interface SelectEvidence extends ElementRef {
   ariaLabel?: string;
   labelText?: string;
   optionCount: number;
-  /** Option labels and values describe the choices offered, not a person's data. */
+  /**
+   * The choices offered — but only when the field's identity says it lists a
+   * configuration vocabulary rather than people. An owner picker lists names,
+   * and no pattern can tell a person's name from a campaign's, so the safe
+   * default is to keep the count and withhold the labels.
+   */
   optionLabels: string[];
   optionValues: string[];
+  /** True when the labels were deliberately not captured. */
+  optionsWithheld?: boolean;
 }
 
 export interface CheckboxEvidence extends ElementRef {
