@@ -165,6 +165,17 @@ async function headingVisible(
 }
 
 /**
+ * How a screen was recognized, so an unconfirmed capture can be told from a
+ * confirmed one rather than both looking the same.
+ */
+export type ArrivalEvidence = 'heading' | 'title' | 'none';
+
+export interface Arrival {
+  heading: string | null;
+  evidence: ArrivalEvidence;
+}
+
+/**
  * Which of the given headings is on screen right now, across the page and every
  * frame. Exact matches are preferred over headings that merely contain the text,
  * so "Edit Queue" is not reported when the heading reads "Edit Queue Member".
@@ -187,6 +198,52 @@ export async function findVisibleHeading(
   return null;
 }
 
+/**
+ * Recognizes a screen by any of the things that actually identify one.
+ *
+ * A heading element first, because that is the strongest signal. Then the
+ * document title, then the text itself anywhere on the page.
+ *
+ * The single-signal version of this is what broke discovery. It required an
+ * <h1>-shaped element carrying the exact panel name; Readymode Starter does not
+ * always render one, so every authenticated screen was judged not to have
+ * opened, nothing past the login page was ever captured, and the resulting
+ * profile resolved login controls and nothing else.
+ */
+export async function findArrival(
+  page: Page,
+  headings: readonly string[],
+  timeoutMs = 250,
+): Promise<Arrival> {
+  const byHeading = await findVisibleHeading(page, headings, timeoutMs);
+  if (byHeading) return { heading: byHeading, evidence: 'heading' };
+
+  // The window title. Starter names the open screen there even when the panel
+  // itself carries no heading element.
+  const title = await page.title().catch(() => '');
+  for (const heading of headings) {
+    if (title && looseHeadingPattern(heading).test(title)) {
+      return { heading, evidence: 'title' };
+    }
+  }
+
+  /**
+   * And that is where confirmation stops.
+   *
+   * A third tier — the screen's name as visible text anywhere — was tried and
+   * removed. Starter's navigation carries a link reading "User Management", so
+   * that tier confirmed the User Management screen while the session was still
+   * on the dashboard. The result would be worse than not confirming: the
+   * dashboard would be captured and labelled as User Management, and wrong
+   * evidence is harder to notice than missing evidence.
+   *
+   * Not confirming costs nothing now, because the crawl inspects a screen
+   * whether or not it could be confirmed. Confirmation says how much to trust
+   * the capture; it no longer decides whether there is one.
+   */
+  return { heading: null, evidence: 'none' };
+}
+
 /** Which known panel is open right now, or null when none is. */
 export async function currentPanelHeading(page: Page, timeoutMs = 250): Promise<string | null> {
   return findVisibleHeading(page, PANEL_HEADINGS, timeoutMs);
@@ -203,12 +260,20 @@ export async function waitForHeading(
   headings: readonly string[],
   timeoutMs = 12_000,
 ): Promise<string | null> {
+  return (await waitForArrival(page, headings, timeoutMs)).heading;
+}
+
+export async function waitForArrival(
+  page: Page,
+  headings: readonly string[],
+  timeoutMs = 12_000,
+): Promise<Arrival> {
   const deadline = Date.now() + timeoutMs;
 
   for (;;) {
-    const found = await findVisibleHeading(page, headings, 400);
-    if (found) return found;
-    if (Date.now() >= deadline) return null;
+    const arrival = await findArrival(page, headings, 400);
+    if (arrival.heading) return arrival;
+    if (Date.now() >= deadline) return arrival;
     await page.waitForTimeout(250).catch(() => undefined);
   }
 }
@@ -722,6 +787,10 @@ export async function openPanel(
   const timeoutMs = options.timeoutMs ?? 12_000;
 
   // Already open. Clicking again would toggle a panel shut.
+  //
+  // Deliberately the strict check: a navigation link reading "User Management"
+  // is not the User Management screen, and the looser signals used to confirm
+  // an arrival would mistake one for the other and skip the navigation.
   const already = await findVisibleHeading(page, target.headings, 250);
   if (already) return { opened: true, heading: already };
 

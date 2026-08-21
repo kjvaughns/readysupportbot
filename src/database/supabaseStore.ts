@@ -821,7 +821,9 @@ export class SupabaseStore implements DataStore {
       .from('readymode_interface_profiles')
       .insert({
         organization_id: input.profile.organizationId,
-        status: 'proposed',
+        // A run that never reached the interface is stored incomplete, so it
+        // cannot be offered for approval.
+        status: input.profile.status ?? 'incomplete',
         schema_version: input.profile.schemaVersion,
         base_url: input.profile.baseUrl,
         interface_version: input.profile.interfaceVersion,

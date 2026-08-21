@@ -59,7 +59,25 @@ export interface ListRequestsFilter {
 }
 
 
-export type InterfaceProfileStatus = 'proposed' | 'active' | 'superseded' | 'rejected';
+/**
+ * Where a discovery profile is in its life.
+ *
+ * `incomplete` and `ready_for_review` are the review states: a run that never
+ * reached the administrative interface stays `incomplete` and can never be
+ * approved, however many login controls it resolved.
+ *
+ * `active` is what an approved profile becomes, and it is the state the runtime
+ * resolver looks for. It is presented to people as "approved"; the name is kept
+ * because a unique index depends on it. `proposed` remains for rows written
+ * before the review states existed.
+ */
+export type InterfaceProfileStatus =
+  | 'incomplete'
+  | 'ready_for_review'
+  | 'proposed'
+  | 'active'
+  | 'superseded'
+  | 'rejected';
 
 export interface SelectorVersionRecord {
   id: string;
@@ -103,7 +121,7 @@ export interface InterfaceProfileWithSelectors extends InterfaceProfileRecord {
 }
 
 export interface CreateInterfaceProfileInput {
-  profile: Omit<
+  profile: { status?: InterfaceProfileStatus } & Omit<
     InterfaceProfileRecord,
     'id' | 'status' | 'approvedBy' | 'approvedAt' | 'supersededBy'
   >;

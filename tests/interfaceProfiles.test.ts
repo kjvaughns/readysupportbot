@@ -53,10 +53,12 @@ beforeEach(() => {
 });
 
 describe('interface profiles', () => {
-  it('stores a discovery run as proposed, not active', async () => {
+  it('stores a discovery run as incomplete, never active', async () => {
     const profile = await store.createInterfaceProfile(profileInput(ORG_A, ['agents.save']));
 
-    expect(profile.status).toBe('proposed');
+    // A fresh run has reached nothing yet, so it starts at the state that
+    // cannot be approved.
+    expect(profile.status).toBe('incomplete');
     expect(await store.getActiveInterfaceProfile(ORG_A)).toBeNull();
   });
 

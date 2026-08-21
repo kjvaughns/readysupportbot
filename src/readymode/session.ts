@@ -130,7 +130,44 @@ export async function openSession(organizationId: string): Promise<ReadymodeSess
  *
  * A CAPTCHA or multi-factor prompt is reported, never solved.
  */
+/**
+ * What happened while signing in, for the discovery report.
+ *
+ * `ensureAuthenticated` returns void because every caller only needs to know it
+ * did not throw. Discovery needs more: which stages actually happened, and in
+ * particular whether the administrator session notice appeared and was
+ * continued past. This carries that back without changing what a failure means.
+ */
+export interface AuthenticationTrace {
+  /** True when a login form was filled, as opposed to a session already open. */
+  submittedCredentials: boolean;
+  /** True when the administrator session notice appeared and Continue was pressed. */
+  continuedPastSessionNotice: boolean;
+  /** True when the dashboard was confirmed after that click. */
+  dashboardVerifiedAfterContinue: boolean;
+}
+
+const authenticationTraces = new WeakMap<ReadymodeSession, AuthenticationTrace>();
+
+/** The trace from the most recent `ensureAuthenticated` for this session. */
+export function lastAuthenticationTrace(session: ReadymodeSession): AuthenticationTrace {
+  return (
+    authenticationTraces.get(session) ?? {
+      submittedCredentials: false,
+      continuedPastSessionNotice: false,
+      dashboardVerifiedAfterContinue: false,
+    }
+  );
+}
+
 export async function ensureAuthenticated(session: ReadymodeSession): Promise<void> {
+  const trace: AuthenticationTrace = {
+    submittedCredentials: false,
+    continuedPastSessionNotice: false,
+    dashboardVerifiedAfterContinue: false,
+  };
+  authenticationTraces.set(session, trace);
+
   const credentials = await resolveCredentials(session.organizationId);
   const { page } = session;
 
@@ -148,6 +185,9 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   // A persistent context can land straight on the administrator session notice
   // without ever showing a login form.
   const before = await handleInterstitial(session, expectedHost);
+  trace.continuedPastSessionNotice = trace.continuedPastSessionNotice || before.clicked;
+  trace.dashboardVerifiedAfterContinue =
+    trace.dashboardVerifiedAfterContinue || before.dashboardVerified;
   if (before.clicked && before.dashboardVerified) {
     await markConnected(session.organizationId, credentials.loginUrl, credentials.username);
     return;
@@ -161,6 +201,7 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   // The password is written straight into the field and never held elsewhere.
   await passwordField.fill(credentials.password);
   await submit.click();
+  trace.submittedCredentials = true;
 
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
 
@@ -175,6 +216,9 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   // The one notice ReadySupport may continue past: another administrator's
   // session being replaced. Everything else is reported, never clicked.
   const after = await handleInterstitial(session, expectedHost);
+  trace.continuedPastSessionNotice = trace.continuedPastSessionNotice || after.clicked;
+  trace.dashboardVerifiedAfterContinue =
+    trace.dashboardVerifiedAfterContinue || after.dashboardVerified;
 
   if (after.clicked && !after.dashboardVerified) {
     throw new AppError(

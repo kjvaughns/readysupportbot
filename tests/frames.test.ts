@@ -54,7 +54,7 @@ describe('control resolution across frames', () => {
     const result = await tryDiscover(page, LOGIN_CONTROLS.username, { timeoutMs: 10 });
 
     expect(result.resolved).not.toBeNull();
-    expect(result.resolved?.rootName).toBe('frame:body');
+    expect(result.resolved?.rootName).toBe('frame "body"');
   });
 
   it('refuses when the same control is visible in two frames', async () => {
@@ -93,7 +93,7 @@ describe('control resolution across frames', () => {
     ]);
 
     const result = await tryDiscover(page, LOGIN_CONTROLS.username, { timeoutMs: 10 });
-    expect(result.resolved?.rootName).toBe('frame:visible');
+    expect(result.resolved?.rootName).toBe('frame "visible"');
   });
 
   it('reports a control that is present but not visible, rather than calling it missing', async () => {

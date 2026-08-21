@@ -460,7 +460,7 @@ export class MemoryStore implements DataStore {
   ): Promise<InterfaceProfileWithSelectors> {
     const profile: InterfaceProfileRecord = {
       id: randomUUID(),
-      status: 'proposed',
+      status: input.profile.status ?? 'incomplete',
       approvedBy: null,
       approvedAt: null,
       supersededBy: null,

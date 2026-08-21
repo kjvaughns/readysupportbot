@@ -45,11 +45,31 @@ export function rootUrl(root: LocatorRoot): string {
   }
 }
 
-/** A stable, human-readable name for a root. */
+/**
+ * A stable, human-readable name for a root.
+ *
+ * The main document is "main document" rather than "page", because a review
+ * screen that puts the page's name next to the frame's name rendered
+ * "pagepage" — twice the same word, saying nothing. These read as a sentence
+ * next to a step name now.
+ */
 export function rootName(root: LocatorRoot, index: number): string {
-  if (isPage(root)) return 'page';
+  if (isPage(root)) return 'main document';
   const name = (root as Frame).name();
-  return name ? `frame:${name}` : `frame#${index}`;
+  return name ? `frame "${name}"` : `frame #${index}`;
+}
+
+/**
+ * Where a control was found, as one phrase.
+ *
+ * Provided already formatted so a caller never has to join a page name and a
+ * frame name itself — which is how two identical words ended up beside each
+ * other.
+ */
+export function locationLabel(step: string, root: string): string {
+  const page = step.trim() || 'unknown page';
+  const frame = root.trim() || 'main document';
+  return frame === 'main document' ? page : `${page} → ${frame}`;
 }
 
 /**

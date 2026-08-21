@@ -9,12 +9,16 @@ import { ReadymodeSession } from '../session';
 import { resolveCredentials } from '../credentials';
 import { InterfaceEvidence, rootStats } from './evidence';
 import { PanelVisit, discoverInterface } from './walk';
-import { ProposedSelector, proposeSelectors, promotable } from './propose';
+import { DiscoveryStage, StageResult, WorkflowProbeResult } from './stages';
+import { ReadinessAssessment, assessReadiness, controlsWithoutMatchers } from './readiness';
+import { CONTROL_MATCHERS, ProposedSelector, proposeSelectors, promotable } from './propose';
 import { AppError } from '../../security/errors';
 
 export * from './evidence';
 export * from './propose';
 export * from './walk';
+export * from './stages';
+export * from './readiness';
 export { inspectCurrentPage, buildEvidence } from './inspector';
 
 /**
@@ -31,8 +35,23 @@ export interface DiscoveryRunResult {
   skipped: Array<{ label: string; reason: string }>;
   /** Every screen the walk tried, with the heading it expected and the one it got. */
   panels: PanelVisit[];
+  /** Every stage, in order, and whether it was reached. */
+  stages: StageResult[];
+  stageReached: DiscoveryStage | null;
+  dashboardConfirmed: boolean;
+  continuedPastSessionNotice: boolean;
+  workflows: WorkflowProbeResult[];
+  /** Whether the profile may be reviewed at all, and why not when it may not. */
+  readiness: ReadinessAssessment;
+  /** Controls with no evidence matcher, which no run could ever resolve. */
+  controlsWithoutMatchers: string[];
+  errors: Array<{ where: string; reason: string }>;
   proposals: ProposedSelector[];
   unproposed: Array<{ control: string; reason: string }>;
+  /** Present in the evidence but not uniquely identifiable. */
+  ambiguous: Array<{ control: string; reason: string }>;
+  /** Nothing matched at all. */
+  unresolved: Array<{ control: string; reason: string }>;
   notObservable: Array<{ control: string; reason: string }>;
   loginPageObserved: boolean;
   roots: { total: number; failed: number; succeeded: number };
@@ -103,10 +122,24 @@ export async function runDiscovery(input: {
     }
   }
 
-  const { proposals, unproposed, notObservable } = proposeSelectors(walk.evidence, ALL_CONTROLS, {
-    skip,
-  });
+  const { proposals, unproposed, ambiguous, unresolved, withoutMatchers, notObservable } =
+    proposeSelectors(walk.evidence, ALL_CONTROLS, { skip });
   const usable = proposals.filter(promotable);
+
+  const screensInspected = walk.evidence.pages.filter((page) =>
+    page.step.startsWith('screen:'),
+  ).length;
+
+  const readiness = assessReadiness({
+    proposals,
+    workflows: walk.workflows,
+    dashboardConfirmed: walk.dashboardConfirmed,
+    screensInspected,
+  });
+
+  const missingMatchers = withoutMatchers.length
+    ? withoutMatchers.map((entry) => entry.control)
+    : controlsWithoutMatchers(new Set(CONTROL_MATCHERS.map((matcher) => matcher.control)));
 
   logger.info(
     {
@@ -126,6 +159,9 @@ export async function runDiscovery(input: {
   const profile = await getStore().createInterfaceProfile({
     profile: {
       organizationId: input.organizationId,
+      // A run that never reached the interface is stored as incomplete, so it
+      // cannot be presented for approval however many login controls it found.
+      status: readiness.readiness === 'ready_for_review' ? 'ready_for_review' : 'incomplete',
       schemaVersion: 1,
       baseUrl: walk.evidence.baseUrl,
       interfaceVersion: detectInterfaceVersion(walk.evidence),
@@ -172,15 +208,20 @@ export async function runDiscovery(input: {
   await recordEvent({
     organizationId: input.organizationId,
     type: 'readymode.interface_discovered',
-    message: `Interface discovery captured ${walk.evidence.pages.length} page(s) and proposed ${usable.length} of ${ALL_CONTROLS.length} controls.`,
+    message:
+      `Interface discovery reached ${walk.stageReached ?? 'no stage'}, inspected ${screensInspected} ` +
+      `administrative screen(s), and proposed ${usable.length} of ${ALL_CONTROLS.length} controls. ` +
+      `Readiness: ${readiness.readiness}.`,
     data: {
       profileId: profile.id,
       visited: walk.visited,
+      readiness: readiness.readiness,
+      stageReached: walk.stageReached,
       panels: walk.panels.map((panel) => ({
-        step: `${panel.route}/${panel.step}`,
+        screen: panel.key,
         expected: panel.expectedHeading,
         observed: panel.observedHeading,
-        opened: panel.opened,
+        confirmed: panel.confirmed,
       })),
       unproposed: unproposed.map((entry) => entry.control),
     },
@@ -193,8 +234,18 @@ export async function runDiscovery(input: {
     visited: walk.visited,
     skipped: walk.skipped,
     panels: walk.panels,
+    stages: walk.stages,
+    stageReached: walk.stageReached,
+    dashboardConfirmed: walk.dashboardConfirmed,
+    continuedPastSessionNotice: walk.continuedPastSessionNotice,
+    workflows: walk.workflows,
+    readiness,
+    controlsWithoutMatchers: missingMatchers,
+    errors: walk.errors,
     proposals,
     unproposed,
+    ambiguous,
+    unresolved,
     notObservable,
     loginPageObserved: walk.loginPageObserved,
     roots,

@@ -14,8 +14,10 @@ import {
 import { openSession, ensureAuthenticated } from '../../readymode/session';
 import { ALL_CONTROLS } from '../../readymode/selectors';
 import { discoveryReport } from '../../readymode/selectors/discovery';
+import { locationLabel } from '../../readymode/selectors/frames';
 import { bindProfile, invalidateProfileCache, loadProfile } from '../../readymode/selectors/resolve';
 import { runDiscovery } from '../../readymode/discovery';
+import { REQUIRED_NAVIGATION_CONTROLS } from '../../readymode/discovery/readiness';
 import {
   BLOCKED_AREAS,
   INSPECTION_DATE,
@@ -228,32 +230,72 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           controlsTotal: result.profile.controlsTotal,
           controlsProposed: result.profile.controlsProposed,
         },
-        visited: result.visited,
-        skipped: result.skipped,
-        // Which screens were opened, and whether the heading each one expected
-        // actually appeared. A run that navigated everywhere and confirmed
-        // nothing looks identical to a successful one without this.
-        panels: result.panels,
-        panelsOpened: result.panels.filter((panel) => panel.opened).length,
-        panelsExpected: result.panels.length,
-        // Proposals carry no raw evidence — only what justifies each one.
+        // -- what a person needs in order to review this run -------------
+        //
+        // Stage first: a run that signed in and then failed to crawl used to
+        // look exactly like a run that crawled and found nothing.
+        authentication: {
+          stageReached: result.stageReached,
+          dashboardConfirmed: result.dashboardConfirmed,
+          continuedPastSessionNotice: result.continuedPastSessionNotice,
+          stages: result.stages,
+        },
+        readiness: {
+          state: result.readiness.readiness,
+          summary: result.readiness.summary,
+          requiredSatisfied: result.readiness.satisfied,
+          requiredMissing: result.readiness.missing,
+          loginOnly: result.readiness.loginOnly,
+          undocumentedWorkflows: result.readiness.undocumentedWorkflows,
+        },
+        pagesInspected: result.evidenceSummary.pages,
+        framesInspected: result.evidenceSummary.roots,
+        screens: result.panels.map((panel) => ({
+          screen: panel.key,
+          label: panel.label,
+          route: panel.route,
+          expectedHeading: panel.expectedHeading,
+          observedHeading: panel.observedHeading,
+          recognizedBy: panel.arrivalEvidence,
+          confirmed: panel.confirmed,
+          inspected: panel.captured,
+          framesInspected: panel.rootsInspected,
+          reason: panel.reason ?? null,
+        })),
+        workflows: result.workflows,
+        workflowsInspected: result.workflows.filter((workflow) => workflow.status === 'discovered')
+          .length,
+        controlsWithoutMatchers: result.controlsWithoutMatchers,
+        discoveryErrors: result.errors,
+        // Controls, split by what would actually fix each one: a better
+        // matcher, another crawl, or nothing at all.
+        controls: {
+          resolved: result.proposals.filter((proposal) => proposal.confidence >= 60).map((proposal) => ({
+            control: proposal.control,
+            tier: proposal.tier,
+            confidence: proposal.confidence,
+            // Pre-formatted, because a review screen joining a page name and a
+            // frame name itself rendered "pagepage".
+            location: locationLabel(proposal.pageStep, proposal.rootName),
+          })),
+          ambiguous: result.ambiguous,
+          unresolved: result.unresolved,
+          withoutMatchers: result.controlsWithoutMatchers,
+          notObservable: result.notObservable,
+        },
         proposals: result.proposals.map((proposal) => ({
           control: proposal.control,
           tier: proposal.tier,
           confidence: proposal.confidence,
           page: proposal.pageStep,
           frame: proposal.rootName,
+          location: locationLabel(proposal.pageStep, proposal.rootName),
           evidence: proposal.evidence,
         })),
         unproposed: result.unproposed,
-        // The count is returned explicitly rather than left to the caller to
-        // derive: a consumer reading a field that does not exist renders "0"
-        // next to a list of 24, which is worse than no number at all.
         unproposedCount: result.unproposed.length,
-        // Aliases, so a consumer using either name gets a truthful figure.
-        unresolved: result.unproposed,
-        unresolvedCount: result.unproposed.length,
-        notObservable: result.notObservable,
+        unresolvedCount: result.unresolved.length,
+        ambiguousCount: result.ambiguous.length,
         notObservableCount: result.notObservable.length,
         counts: {
           pagesCaptured: result.evidenceSummary.pages,
@@ -262,21 +304,30 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           controlsTotal: result.profile.controlsTotal,
           proposed: result.proposals.length,
           usable: result.profile.controlsProposed,
-          unresolved: result.unproposed.length,
+          ambiguous: result.ambiguous.length,
+          unresolved: result.unresolved.length,
+          withoutMatchers: result.controlsWithoutMatchers.length,
           notObservable: result.notObservable.length,
         },
+        visited: result.visited,
+        skipped: result.skipped,
+        panels: result.panels,
         loginPageObserved: result.loginPageObserved,
         redactions: result.evidenceSummary,
         message: [
           `Captured ${result.evidenceSummary.pages} page(s) across ${result.roots.total} frame(s)` +
             `${result.roots.failed > 0 ? ` (${result.roots.failed} unreadable)` : ''}.`,
-          `Opened ${result.panels.filter((panel) => panel.opened).length} of ${result.panels.length} screen(s) it tried.`,
+          `Reached ${result.stageReached ?? 'no stage'}; the authenticated dashboard was ` +
+            `${result.dashboardConfirmed ? 'confirmed' : 'NOT confirmed'}.`,
+          `Inspected ${result.panels.filter((panel) => panel.captured).length} of ${result.panels.length} screen(s), ` +
+            `${result.panels.filter((panel) => panel.confirmed).length} of them confirmed by name.`,
           `Proposed ${result.profile.controlsProposed} of ${result.profile.controlsTotal} controls;` +
             ` ${result.unproposed.length} unresolved` +
             `${result.notObservable.length > 0 ? `, ${result.notObservable.length} not on screen this run` : ''}.`,
           result.loginPageObserved
             ? ''
             : 'The session was already signed in, so the login controls were not observable.',
+          result.readiness.summary,
           'Nothing in Readymode was changed. An Owner must approve this profile before the selectors are used.',
         ]
           .filter(Boolean)
@@ -398,6 +449,30 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
       throw new ValidationError(
         'This profile only identified the login controls, so it says nothing about the administrative interface. ' +
           'Run discovery again from a signed-in session so it can reach User Management, License Usage and Lead Management.',
+      );
+    }
+
+    // Readiness is decided when the run happens, from what it actually reached.
+    // Approval reads that decision; it does not get to overrule it.
+    if (profile.status === 'incomplete') {
+      throw new ValidationError(
+        'This profile is incomplete: discovery did not reach or confirm enough of the administrative ' +
+          'interface for the result to mean anything. Approving it would not make the unresolved controls ' +
+          'usable — it would only hide that they are unresolved. Run discovery again.',
+      );
+    }
+
+    if (profile.status === 'rejected') {
+      throw new ValidationError('This profile was rejected. Run discovery again rather than approving it.');
+    }
+
+    const requiredMissing = REQUIRED_NAVIGATION_CONTROLS.filter(
+      (control) => !usable.some((selector) => selector.controlName === control),
+    );
+    if (requiredMissing.length > 0) {
+      throw new ValidationError(
+        `This profile has not resolved every required navigation control (${requiredMissing.join(', ')}). ` +
+          'Approving it would leave those controls unresolved and unusable regardless, so nothing would be gained.',
       );
     }
 
