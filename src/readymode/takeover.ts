@@ -3,11 +3,8 @@ import { recordEvent } from '../audit';
 import { logger } from '../security/logger';
 import { sanitizePageValue } from '../security/sanitize';
 import { withoutPersonalData } from '../security/personalData';
-import {
-  HUMAN_VERIFICATION_CONDITIONS,
-  LOGIN_SUCCESS_CONDITIONS,
-  TAKEOVER_CONTROLS,
-} from './selectors';
+import { HUMAN_VERIFICATION_CONDITIONS, TAKEOVER_CONTROLS } from './selectors';
+import { checkAuthentication } from './authState';
 import { anyPresent, tryDiscover } from './selectors/discovery';
 import { allText, listSearchRoots } from './selectors/frames';
 import {
@@ -81,7 +78,10 @@ export async function captureInterstitial(page: Page): Promise<InterstitialSnaps
     buttons,
     hasPasswordField: await hasPasswordField(page),
     hasCaptcha: await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 800),
-    dashboardSignalPresent: await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 800),
+    // The signed-in shell, not merely something a page might have. The old
+    // check matched a nav element, which a login page also carries, so a login
+    // page could read as "the dashboard is present".
+    dashboardSignalPresent: (await checkAuthentication(page, 800)).authenticated,
   };
 }
 
@@ -187,7 +187,10 @@ export async function handleInterstitial(
     };
   }
 
-  const dashboardVerified = await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 5000);
+  // After pressing Continue, the dashboard has to be proved by the signed-in
+  // shell. A page still showing the login form never counts, however long it is
+  // waited for.
+  const dashboardVerified = (await checkAuthentication(page, 5000)).authenticated;
 
   return {
     classification: 'admin_session_takeover',

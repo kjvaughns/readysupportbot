@@ -12,11 +12,13 @@ import {
 import { recordEvent } from '../audit';
 import { getStore } from '../database';
 import { resolveCredentials } from './credentials';
+import { checkAuthentication, waitForLoginOutcome, type LoginOutcome } from './authState';
+import { classifyInterstitial } from './interstitial';
+import { captureInterstitial } from './takeover';
 import {
   HUMAN_VERIFICATION_CONDITIONS,
   LOGIN_CONTROLS,
   LOGIN_FAILURE_CONDITIONS,
-  LOGIN_SUCCESS_CONDITIONS,
 } from './selectors';
 import { anyPresent, discover } from './selectors/discovery';
 import { handleInterstitial } from './takeover';
@@ -145,6 +147,14 @@ export interface AuthenticationTrace {
   continuedPastSessionNotice: boolean;
   /** True when the dashboard was confirmed after that click. */
   dashboardVerifiedAfterContinue: boolean;
+  /** Which authenticated marker proved the session, if one did. */
+  authenticatedMarker: string | null;
+  /** The address after the login form was submitted. Diagnostic only. */
+  urlAfterSubmit: string | null;
+  /** The address after Continue was pressed. Diagnostic only. */
+  urlAfterContinue: string | null;
+  /** How the login attempt ended. */
+  outcome: LoginOutcome | null;
 }
 
 const authenticationTraces = new WeakMap<ReadymodeSession, AuthenticationTrace>();
@@ -156,6 +166,10 @@ export function lastAuthenticationTrace(session: ReadymodeSession): Authenticati
       submittedCredentials: false,
       continuedPastSessionNotice: false,
       dashboardVerifiedAfterContinue: false,
+      authenticatedMarker: null,
+      urlAfterSubmit: null,
+      urlAfterContinue: null,
+      outcome: null,
     }
   );
 }
@@ -165,6 +179,10 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
     submittedCredentials: false,
     continuedPastSessionNotice: false,
     dashboardVerifiedAfterContinue: false,
+    authenticatedMarker: null,
+    urlAfterSubmit: null,
+    urlAfterContinue: null,
+    outcome: null,
   };
   authenticationTraces.set(session, trace);
 
@@ -175,7 +193,15 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
 
   await page.goto(credentials.loginUrl, { waitUntil: 'domcontentloaded' });
 
-  if (await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 1500)) return;
+  // Already signed in? Only when a real authenticated marker is on screen AND
+  // no password field is. The old check matched a nav element, which the login
+  // page has, so it returned here without ever entering the credentials.
+  const existing = await checkAuthentication(page, 1500);
+  if (existing.authenticated) {
+    trace.authenticatedMarker = existing.marker;
+    trace.outcome = 'authenticated';
+    return;
+  }
 
   if (await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 1000)) {
     await markAuthenticationRequired(session.organizationId, 'Human verification appeared at login.');
@@ -204,8 +230,28 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   trace.submittedCredentials = true;
 
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+  trace.urlAfterSubmit = page.url();
 
-  if (await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 2000)) {
+  // One of five outcomes, all named. A login that neither succeeded nor
+  // visibly failed is a real state, and treating it as success is how a run
+  // ends up crawling a login page.
+  const outcome = await waitForLoginOutcome(page, {
+    humanVerification: () => anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 400),
+    sessionWarning: async () => {
+      const snapshot = await captureInterstitial(page);
+      return classifyInterstitial(snapshot).classification === 'admin_session_takeover';
+    },
+    limitedAdminMode: async () => {
+      const snapshot = await captureInterstitial(page);
+      return classifyInterstitial(snapshot).classification === 'limited_admin_mode';
+    },
+    loginError: () => anyPresent(page, LOGIN_FAILURE_CONDITIONS, 400),
+  });
+
+  trace.outcome = outcome.outcome;
+  trace.authenticatedMarker = outcome.marker;
+
+  if (outcome.outcome === 'human_verification') {
     await markAuthenticationRequired(
       session.organizationId,
       'Readymode asked for human verification after the password was submitted.',
@@ -217,6 +263,7 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   // session being replaced. Everything else is reported, never clicked.
   const after = await handleInterstitial(session, expectedHost);
   trace.continuedPastSessionNotice = trace.continuedPastSessionNotice || after.clicked;
+  if (after.clicked) trace.urlAfterContinue = page.url();
   trace.dashboardVerifiedAfterContinue =
     trace.dashboardVerifiedAfterContinue || after.dashboardVerified;
 
@@ -228,7 +275,10 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
     );
   }
 
-  if (await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 5000)) {
+  const confirmed = await checkAuthentication(page, 3000);
+  if (confirmed.authenticated) {
+    trace.authenticatedMarker = confirmed.marker;
+    trace.outcome = 'authenticated';
     await markConnected(session.organizationId, credentials.loginUrl, credentials.username);
     return;
   }

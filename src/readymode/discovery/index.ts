@@ -9,7 +9,7 @@ import { ReadymodeSession } from '../session';
 import { resolveCredentials } from '../credentials';
 import { InterfaceEvidence, rootStats } from './evidence';
 import { PanelVisit, discoverInterface } from './walk';
-import { DiscoveryStage, StageResult, WorkflowProbeResult } from './stages';
+import { DiscoveryState, StageResult, WorkflowProbeResult } from './stages';
 import { ReadinessAssessment, assessReadiness, controlsWithoutMatchers } from './readiness';
 import { CONTROL_MATCHERS, ProposedSelector, proposeSelectors, promotable } from './propose';
 import { AppError } from '../../security/errors';
@@ -37,9 +37,28 @@ export interface DiscoveryRunResult {
   panels: PanelVisit[];
   /** Every stage, in order, and whether it was reached. */
   stages: StageResult[];
-  stageReached: DiscoveryStage | null;
+  stageReached: DiscoveryState | null;
   dashboardConfirmed: boolean;
   continuedPastSessionNotice: boolean;
+  /**
+   * Counted honestly. Twelve captures of the same login redirect is one page
+   * seen twelve times, not twelve pages.
+   */
+  totals: {
+    uniqueAuthenticatedPages: number;
+    loginRedirects: number;
+    framesInspected: number;
+    screensConfirmed: number;
+    screensAttempted: number;
+  };
+  session: { atLogin: unknown; atCrawl: unknown; same: boolean };
+  authentication: {
+    outcome: string | null;
+    marker: string | null;
+    urlAfterSubmit: string | null;
+    urlAfterContinue: string | null;
+  };
+  authenticationLostAt: string | null;
   workflows: WorkflowProbeResult[];
   /** Whether the profile may be reviewed at all, and why not when it may not. */
   readiness: ReadinessAssessment;
@@ -134,7 +153,9 @@ export async function runDiscovery(input: {
     proposals,
     workflows: walk.workflows,
     dashboardConfirmed: walk.dashboardConfirmed,
-    screensInspected,
+    // Screens actually confirmed while signed in. A login redirect captured
+    // under a screen's name is not that screen.
+    screensInspected: walk.screensConfirmed,
   });
 
   const missingMatchers = withoutMatchers.length
@@ -238,6 +259,16 @@ export async function runDiscovery(input: {
     stageReached: walk.stageReached,
     dashboardConfirmed: walk.dashboardConfirmed,
     continuedPastSessionNotice: walk.continuedPastSessionNotice,
+    totals: {
+      uniqueAuthenticatedPages: walk.uniqueAuthenticatedPages,
+      loginRedirects: walk.loginRedirects,
+      framesInspected: walk.evidence.pages.reduce((sum, entry) => sum + entry.roots.length, 0),
+      screensConfirmed: walk.screensConfirmed,
+      screensAttempted: walk.screensAttempted,
+    },
+    session: walk.session,
+    authentication: walk.authentication,
+    authenticationLostAt: walk.authenticationLostAt,
     workflows: walk.workflows,
     readiness,
     controlsWithoutMatchers: missingMatchers,

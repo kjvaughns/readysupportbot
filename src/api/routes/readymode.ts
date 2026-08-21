@@ -238,8 +238,21 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           stageReached: result.stageReached,
           dashboardConfirmed: result.dashboardConfirmed,
           continuedPastSessionNotice: result.continuedPastSessionNotice,
+          outcome: result.authentication.outcome,
+          // Which marker proved the session — not the URL, which proves nothing.
+          confirmedBy: result.authentication.marker,
+          urlAfterSubmit: result.authentication.urlAfterSubmit,
+          urlAfterContinue: result.authentication.urlAfterContinue,
+          authenticationLostAt: result.authenticationLostAt,
           stages: result.stages,
         },
+        // Safe browser identity, recorded before signing in and again before
+        // crawling, so "was it the same session?" is answerable rather than
+        // arguable. No cookie name, value, domain or expiry is included.
+        session: result.session,
+        // Counted honestly: twelve captures of the same login redirect is one
+        // page seen twelve times, not twelve pages of interface.
+        totals: result.totals,
         readiness: {
           state: result.readiness.readiness,
           summary: result.readiness.summary,
@@ -249,11 +262,17 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           undocumentedWorkflows: result.readiness.undocumentedWorkflows,
         },
         pagesInspected: result.evidenceSummary.pages,
-        framesInspected: result.evidenceSummary.roots,
+        framesInspected: result.totals.framesInspected,
+        uniqueAuthenticatedPages: result.totals.uniqueAuthenticatedPages,
+        loginRedirects: result.totals.loginRedirects,
+        screensConfirmed: result.totals.screensConfirmed,
+        screensAttempted: result.totals.screensAttempted,
         screens: result.panels.map((panel) => ({
           screen: panel.key,
           label: panel.label,
           route: panel.route,
+          finalUrl: panel.finalUrl,
+          redirectedToLogin: panel.redirectedToLogin,
           expectedHeading: panel.expectedHeading,
           observedHeading: panel.observedHeading,
           recognizedBy: panel.arrivalEvidence,
@@ -293,7 +312,16 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           evidence: proposal.evidence,
         })),
         unproposed: result.unproposed,
+        // "Nothing proposed" is exactly these three added together. They were
+        // reported separately and summed differently, so the same run showed
+        // two different figures for the same fact.
         unproposedCount: result.unproposed.length,
+        nothingProposed: {
+          total: result.unproposed.length,
+          ambiguous: result.ambiguous.length,
+          unresolved: result.unresolved.length,
+          withoutMatchers: result.controlsWithoutMatchers.length,
+        },
         unresolvedCount: result.unresolved.length,
         ambiguousCount: result.ambiguous.length,
         notObservableCount: result.notObservable.length,
@@ -315,12 +343,16 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
         loginPageObserved: result.loginPageObserved,
         redactions: result.evidenceSummary,
         message: [
-          `Captured ${result.evidenceSummary.pages} page(s) across ${result.roots.total} frame(s)` +
+          `Captured ${result.totals.uniqueAuthenticatedPages} authenticated page(s) across ` +
+            `${result.totals.framesInspected} frame(s)` +
+            `${result.totals.loginRedirects > 0 ? `, plus ${result.totals.loginRedirects} login redirect(s)` : ''}` +
             `${result.roots.failed > 0 ? ` (${result.roots.failed} unreadable)` : ''}.`,
           `Reached ${result.stageReached ?? 'no stage'}; the authenticated dashboard was ` +
             `${result.dashboardConfirmed ? 'confirmed' : 'NOT confirmed'}.`,
-          `Inspected ${result.panels.filter((panel) => panel.captured).length} of ${result.panels.length} screen(s), ` +
-            `${result.panels.filter((panel) => panel.confirmed).length} of them confirmed by name.`,
+          `Confirmed ${result.totals.screensConfirmed} of ${result.totals.screensAttempted} screen(s) attempted.`,
+          result.authenticationLostAt
+            ? `The session was lost at ${result.authenticationLostAt} and the crawl stopped there.`
+            : '',
           `Proposed ${result.profile.controlsProposed} of ${result.profile.controlsTotal} controls;` +
             ` ${result.unproposed.length} unresolved` +
             `${result.notObservable.length > 0 ? `, ${result.notObservable.length} not on screen this run` : ''}.`,

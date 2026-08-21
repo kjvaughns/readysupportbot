@@ -74,6 +74,8 @@ export function assessReadiness(input: {
     .filter((workflow) => !workflow.reason)
     .map((workflow) => workflow.key);
 
+  // The dashboard first. Everything else in a run is meaningless without it,
+  // because a run that never signed in captures the login page over and over.
   if (!input.dashboardConfirmed || input.screensInspected === 0 || loginOnly) {
     return {
       readiness: 'incomplete',

@@ -331,3 +331,16 @@ export function buildFakePage(
 
   return { page, log };
 }
+
+/** The shape `sessionDiagnostics` returns, for tests that do not need a browser. */
+export interface SessionDiagnosticsLike {
+  provider: 'browserbase' | 'local';
+  browserbaseSessionId: string | null;
+  contextIndex: number;
+  contextCount: number;
+  pageIndex: number;
+  pageCount: number;
+  url: string;
+  cookieCount: number;
+  hasAuthenticationCookie: boolean;
+}

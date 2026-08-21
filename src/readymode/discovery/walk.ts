@@ -1,7 +1,5 @@
 import type { Page } from 'playwright-core';
 import { sanitizePageValue } from '../../security/sanitize';
-import { LOGIN_SUCCESS_CONDITIONS } from '../selectors';
-import { anyPresent } from '../selectors/discovery';
 import {
   Arrival,
   findExactLabel,
@@ -11,17 +9,25 @@ import {
   waitForArrival,
 } from '../navigation';
 import { DASHBOARD_ROUTE } from '../interface/registry';
+import {
+  AuthenticationCheck,
+  SessionDiagnostics,
+  checkAuthentication,
+  sameSession,
+  sessionDiagnostics,
+} from '../authState';
 import { ReadymodeSession, ensureAuthenticated, lastAuthenticationTrace } from '../session';
 import { EVIDENCE_CAPS, InterfaceEvidence, PageEvidence } from './evidence';
 import { buildEvidence, inspectCurrentPage } from './inspector';
 import {
   CRAWL_TARGETS,
   CrawlTarget,
-  DiscoveryStage,
+  DiscoveryState,
   StageResult,
   WORKFLOW_PROBES,
   WorkflowProbeResult,
   furthestStage,
+  mayClaimCrawled,
 } from './stages';
 
 /**
@@ -75,6 +81,10 @@ export interface PanelVisit {
   /** True when arrival was confirmed. Evidence is captured either way. */
   confirmed: boolean;
   captured: boolean;
+  /** The address the navigation actually ended at. Never proof of anything. */
+  finalUrl: string | null;
+  /** True when the route bounced back to the login form. */
+  redirectedToLogin: boolean;
   /** Roots inspected on this screen, so an empty capture is visible. */
   rootsInspected: number;
   reason?: string;
@@ -83,7 +93,24 @@ export interface PanelVisit {
 export interface WalkResult {
   evidence: InterfaceEvidence;
   stages: StageResult[];
-  stageReached: DiscoveryStage | null;
+  stageReached: DiscoveryState | null;
+  /** Safe browser identity, recorded before login and again before crawling. */
+  session: { atLogin: SessionDiagnostics | null; atCrawl: SessionDiagnostics | null; same: boolean };
+  /** How the login attempt ended, and which marker proved it. */
+  authentication: {
+    outcome: string | null;
+    marker: string | null;
+    urlAfterSubmit: string | null;
+    urlAfterContinue: string | null;
+  };
+  /** Set when a route bounced back to login mid-crawl. */
+  authenticationLostAt: string | null;
+  /** Captures that were the login page rather than an administrative screen. */
+  loginRedirects: number;
+  /** Distinct administrative screens actually captured while signed in. */
+  uniqueAuthenticatedPages: number;
+  screensAttempted: number;
+  screensConfirmed: number;
   /** True when the authenticated dashboard was positively confirmed. */
   dashboardConfirmed: boolean;
   /** True when the administrator session notice appeared and was continued past. */
@@ -118,7 +145,7 @@ export async function discoverInterface(
   const { page } = session;
   let captured = 0;
 
-  const record = (stage: DiscoveryStage, reached: boolean, detail?: string) => {
+  const record = (stage: DiscoveryState, reached: boolean, detail?: string) => {
     stages.push({ stage, reached, at: now(), detail });
   };
 
@@ -138,36 +165,42 @@ export async function discoverInterface(
     errors.push({ where: 'login', reason: reasonOf(error) });
   });
 
-  const loginPageObserved = !(await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 1500));
+  const atLogin = await sessionDiagnostics(session).catch(() => null);
+
+  // Whether the login form is on screen, decided by the form itself rather than
+  // by signals a login page also satisfies.
+  const beforeSignIn = await checkAuthentication(page, 1500);
+  const loginPageObserved = beforeSignIn.loginFormPresent;
+
   await inspect(loginPageObserved ? 'login' : 'already-signed-in', null);
-  record('login_page_inspected', true, loginPageObserved ? undefined : 'Already signed in.');
+  record(
+    'login_page_confirmed',
+    true,
+    loginPageObserved
+      ? 'The login form is on screen.'
+      : `No login form; already signed in${beforeSignIn.marker ? ` (${beforeSignIn.marker})` : ''}.`,
+  );
 
-  // -- Stage 2 and 3: sign in, and continue past the session notice ---------
-  try {
-    await ensureAuthenticated(session);
-    const trace = lastAuthenticationTrace(session);
+  const failed = (detail: string): WalkResult => {
+    record('authentication_failed', true, detail);
+    errors.push({ where: 'authentication', reason: detail });
 
-    record('credentials_submitted', true, trace.submittedCredentials ? undefined : 'Session already open.');
-    record(
-      'session_takeover_continued',
-      trace.continuedPastSessionNotice,
-      trace.continuedPastSessionNotice
-        ? 'Another administrator was signed in; Continue was pressed once.'
-        : 'The administrator session notice did not appear.',
-    );
-  } catch (error) {
-    record('credentials_submitted', false, reasonOf(error));
-    record('session_takeover_continued', false);
-    record('authenticated', false, 'Sign-in did not complete.');
-    errors.push({ where: 'authentication', reason: reasonOf(error) });
-
-    // Without a session there is nothing to crawl, and a profile built from the
-    // login page alone is the failure this whole rewrite is about. Return what
-    // was seen and let the caller refuse to publish it.
     return {
       evidence: buildEvidence(loginUrl, pages, counters),
       stages,
       stageReached: furthestStage(stages),
+      session: { atLogin, atCrawl: null, same: true },
+      authentication: {
+        outcome: lastAuthenticationTrace(session).outcome,
+        marker: null,
+        urlAfterSubmit: lastAuthenticationTrace(session).urlAfterSubmit,
+        urlAfterContinue: lastAuthenticationTrace(session).urlAfterContinue,
+      },
+      authenticationLostAt: null,
+      loginRedirects: 0,
+      uniqueAuthenticatedPages: 0,
+      screensAttempted: 0,
+      screensConfirmed: 0,
       dashboardConfirmed: false,
       continuedPastSessionNotice: false,
       panels,
@@ -177,43 +210,108 @@ export async function discoverInterface(
       errors,
       loginPageObserved,
     };
+  };
+
+  // -- Stages 2 and 3: sign in, and continue past the session notice --------
+  try {
+    await ensureAuthenticated(session);
+  } catch (error) {
+    record('credentials_submitted', true, 'Submitted, but sign-in did not complete.');
+    return failed(reasonOf(error));
   }
 
   const trace = lastAuthenticationTrace(session);
 
-  // -- Stage 4: confirm the authenticated interface -------------------------
-  const dashboard = await gotoRoute(page, DASHBOARD_ROUTE, ['Dashboard'], { timeoutMs: 8000 });
-  const signedIn =
-    dashboard.opened || (await anyPresent(page, LOGIN_SUCCESS_CONDITIONS, 3000));
-
   record(
-    'authenticated',
-    signedIn,
-    signedIn
-      ? `Confirmed by ${dashboard.opened ? 'the Dashboard' : 'an authenticated navigation signal'}.`
-      : 'Neither the Dashboard nor any authenticated signal could be confirmed.',
+    'credentials_submitted',
+    true,
+    trace.submittedCredentials
+      ? `Submitted; outcome: ${trace.outcome ?? 'unknown'}.`
+      : 'A session was already open, so no credentials were submitted.',
+  );
+  record(
+    'multiple_session_continued',
+    trace.continuedPastSessionNotice,
+    trace.continuedPastSessionNotice
+      ? 'Another administrator was signed in; Continue was pressed once.'
+      : 'The administrator session notice did not appear.',
   );
 
-  if (!signedIn) {
+  // -- Stage 4: confirm the authenticated dashboard -------------------------
+  //
+  // The dashboard has to be proved by something only the signed-in shell has.
+  // A previous version accepted any navigation element, which the login page
+  // also has, so it confirmed a dashboard that was really a login form and then
+  // crawled eleven redirects back to it.
+  await gotoRoute(page, DASHBOARD_ROUTE, ['Dashboard'], { timeoutMs: 8000 });
+  const authenticated: AuthenticationCheck = await checkAuthentication(page, 4000);
+
+  record(
+    'authenticated_dashboard_confirmed',
+    authenticated.authenticated,
+    authenticated.authenticated
+      ? `Confirmed by the ${authenticated.marker}.`
+      : authenticated.loginFormPresent
+        ? 'The dashboard route showed the login form, so the session is not signed in.'
+        : 'No authenticated marker was found on the dashboard route.',
+  );
+
+  if (!authenticated.authenticated) {
+    return failed(
+      authenticated.loginFormPresent
+        ? 'Signing in reported success, but the dashboard route shows the login form.'
+        : 'Signing in reported success, but no authenticated marker could be found.',
+    );
+  }
+
+  const atCrawl = await sessionDiagnostics(session).catch(() => null);
+  const sessionUnchanged = !atLogin || !atCrawl || sameSession(atLogin, atCrawl);
+
+  if (!sessionUnchanged) {
+    // Never observed — the session is one browser, one context, one page
+    // throughout — but asserting it is cheaper than trusting it.
     errors.push({
-      where: 'authentication',
-      reason: 'Signed in without error, but no authenticated screen could be confirmed.',
+      where: 'session',
+      reason: 'The browser context or page changed between signing in and crawling.',
     });
   }
 
-  // -- Stage 5 and 6: crawl every screen, inspecting each one ---------------
-  const reached = new Set<string>();
+  record('interface_crawling', true, `Crawling as ${atCrawl?.provider ?? 'unknown'} session.`);
+
+  // -- Stages 5 and 6: crawl every screen, inspecting each one --------------
+  let loginRedirects = 0;
+  let screensAttempted = 0;
+  let screensConfirmed = 0;
+  let authenticationLostAt: string | null = null;
 
   for (const target of CRAWL_TARGETS) {
+    if (authenticationLostAt) {
+      skipped.push({ label: target.label, reason: 'The crawl stopped when the session was lost.' });
+      continue;
+    }
     if (captured >= maxStops + 2) {
       skipped.push({ label: target.label, reason: 'Capture limit reached.' });
       continue;
     }
 
+    screensAttempted += 1;
     const visit = await visitTarget(page, target);
     panels.push(visit);
 
-    if (visit.confirmed || visit.captured) reached.add(target.key);
+    // A route that bounces back to login is not an administrative screen, and
+    // recording it as one is how twelve captures of the same login page were
+    // reported as twelve pages of interface.
+    if (visit.redirectedToLogin) {
+      loginRedirects += 1;
+      authenticationLostAt = target.key;
+      skipped.push({
+        label: target.label,
+        reason: 'Redirected to the login form; the session was lost here.',
+      });
+      break;
+    }
+
+    if (visit.confirmed) screensConfirmed += 1;
 
     if (visit.captured) {
       const evidence = await inspect(`screen:${target.key}`, target.expect[0] ?? null);
@@ -225,10 +323,36 @@ export async function discoverInterface(
     }
   }
 
-  record('interface_crawled', visited.length > 0, `${visited.length} screen(s) inspected.`);
+  if (authenticationLostAt) {
+    record(
+      'authentication_lost',
+      true,
+      `The session was signed in and then was not: ${authenticationLostAt} redirected to the login form.`,
+    );
+    errors.push({
+      where: `screen:${authenticationLostAt}`,
+      reason: 'Redirected to the login form mid-crawl.',
+    });
+  }
+
+  // Only a run that confirmed the dashboard and then confirmed at least one
+  // administrative screen may say it crawled the interface.
+  const crawled = mayClaimCrawled({
+    dashboardConfirmed: authenticated.authenticated,
+    screensConfirmed,
+    authenticationLost: Boolean(authenticationLostAt),
+  });
+
+  record(
+    'interface_crawled',
+    crawled,
+    crawled
+      ? `${visited.length} screen(s) inspected, ${screensConfirmed} confirmed by name.`
+      : `Not claimed: ${screensConfirmed} screen(s) confirmed of ${screensAttempted} attempted.`,
+  );
 
   // -- Workflows -------------------------------------------------------------
-  if (!options.skipWorkflows && signedIn) {
+  if (!options.skipWorkflows && crawled) {
     for (const probe of WORKFLOW_PROBES) {
       const result: WorkflowProbeResult = {
         key: probe.key,
@@ -304,13 +428,27 @@ export async function discoverInterface(
     }
   }
 
-  record('profile_generated', signedIn && visited.length > 0);
+  record('profile_generated', crawled);
 
   return {
     evidence: buildEvidence(loginUrl, pages, counters),
     stages,
     stageReached: furthestStage(stages),
-    dashboardConfirmed: signedIn,
+    session: { atLogin, atCrawl, same: sessionUnchanged },
+    authentication: {
+      outcome: trace.outcome,
+      marker: authenticated.marker,
+      urlAfterSubmit: trace.urlAfterSubmit,
+      urlAfterContinue: trace.urlAfterContinue,
+    },
+    authenticationLostAt,
+    loginRedirects,
+    // Distinct administrative screens, counted from what was actually captured
+    // rather than from how many times a page was inspected.
+    uniqueAuthenticatedPages: new Set(visited.filter((step) => step.startsWith('screen:') || !step.includes(':'))).size,
+    screensAttempted,
+    screensConfirmed,
+    dashboardConfirmed: authenticated.authenticated,
     continuedPastSessionNotice: trace.continuedPastSessionNotice,
     panels,
     workflows,
@@ -339,6 +477,8 @@ async function visitTarget(page: Page, target: CrawlTarget): Promise<PanelVisit>
     arrivalEvidence: 'none',
     confirmed: false,
     captured: false,
+    finalUrl: null,
+    redirectedToLogin: false,
     rootsInspected: 0,
     reason: target.knownLimitation,
   };
@@ -355,6 +495,19 @@ async function visitTarget(page: Page, target: CrawlTarget): Promise<PanelVisit>
         visit.reason = `The "${target.tabLabel}" tab was not uniquely visible.`;
       }
     }
+  }
+
+  // Before anything else: did this route bounce back to the login form? The
+  // final URL is recorded and is never the thing that answers the question.
+  const state = await checkAuthentication(page, 1200);
+  visit.finalUrl = state.url;
+
+  if (state.loginFormPresent) {
+    visit.redirectedToLogin = true;
+    visit.captured = false;
+    visit.confirmed = false;
+    visit.reason = 'Redirected to the login form.';
+    return visit;
   }
 
   const arrival = await waitForArrival(page, target.expect, 3000);

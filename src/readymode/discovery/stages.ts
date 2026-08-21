@@ -12,30 +12,72 @@ import { EvidenceStatus } from '../interface/types';
  */
 
 export const DISCOVERY_STAGES = [
-  'login_page_inspected',
+  'login_page_confirmed',
   'credentials_submitted',
-  'session_takeover_continued',
-  'authenticated',
+  'multiple_session_continued',
+  'authenticated_dashboard_confirmed',
+  'interface_crawling',
   'interface_crawled',
   'profile_generated',
 ] as const;
 
+/**
+ * Ways a run can end without reaching the interface.
+ *
+ * Separate from the ordered stages because they are not progress: reaching one
+ * means the run stopped. `authentication_lost` in particular describes a run
+ * that *was* signed in and then was not — a route redirected back to login —
+ * and the crawl stops there rather than recording the login page as another
+ * administrative screen.
+ */
+export const DISCOVERY_FAILURES = ['authentication_failed', 'authentication_lost'] as const;
+
+export type DiscoveryFailure = (typeof DISCOVERY_FAILURES)[number];
+
 export type DiscoveryStage = (typeof DISCOVERY_STAGES)[number];
 
+/** Every state a run can report, ordered stages plus the two failures. */
+export type DiscoveryState = DiscoveryStage | DiscoveryFailure;
+
 export interface StageResult {
-  stage: DiscoveryStage;
+  stage: DiscoveryState;
   reached: boolean;
   at: string;
   detail?: string;
 }
 
-/** The furthest stage a run got to. */
-export function furthestStage(stages: StageResult[]): DiscoveryStage | null {
+/**
+ * The furthest state a run got to.
+ *
+ * A failure state wins over any stage before it: a run that lost its session
+ * half way through the crawl reports `authentication_lost`, not
+ * `interface_crawling`, because the second would read as progress.
+ */
+export function furthestStage(stages: StageResult[]): DiscoveryState | null {
+  for (const failure of DISCOVERY_FAILURES) {
+    if (stages.some((entry) => entry.stage === failure && entry.reached)) return failure;
+  }
+
   let furthest: DiscoveryStage | null = null;
   for (const stage of DISCOVERY_STAGES) {
     if (stages.some((entry) => entry.stage === stage && entry.reached)) furthest = stage;
   }
   return furthest;
+}
+
+/**
+ * Whether a run may claim it crawled the interface.
+ *
+ * Two conditions, both required. The dashboard must have been confirmed, and at
+ * least one administrative screen must have been confirmed after it. A run that
+ * navigated eleven times and confirmed nothing has not crawled anything.
+ */
+export function mayClaimCrawled(input: {
+  dashboardConfirmed: boolean;
+  screensConfirmed: number;
+  authenticationLost: boolean;
+}): boolean {
+  return input.dashboardConfirmed && input.screensConfirmed > 0 && !input.authenticationLost;
 }
 
 /**

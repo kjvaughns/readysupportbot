@@ -88,11 +88,31 @@ export const LOGIN_CONTROLS = {
   ]),
 } as const;
 
-/** Signals that the session is authenticated. Any one of these is sufficient. */
+/**
+ * Signals that the session is authenticated.
+ *
+ * These used to include `role=navigation` and the text /log ?out|sign ?out/,
+ * and Readymode's login page satisfies both — it has a nav, and it mentions
+ * signing out. So the check passed on the login page: `ensureAuthenticated`
+ * concluded the session was already signed in and returned without entering
+ * the credentials, and discovery then captured the same login page twelve times
+ * while reporting that it had crawled the administrative interface.
+ *
+ * What replaced them are element ids the read-only inspection recorded on the
+ * authenticated hotbar. A generic role is something any page might have; these
+ * exist only once signed in.
+ *
+ * Prefer `checkAuthentication` in `authState.ts` over matching these directly:
+ * it additionally refuses any page showing a password field, which is the check
+ * that makes the whole class of mistake impossible.
+ */
 export const LOGIN_SUCCESS_CONDITIONS: SelectorStrategy[] = [
+  { type: 'css', value: '#hotbar_search' },
+  { type: 'css', value: '#CCS_Session_Statebox' },
+  { type: 'css', value: '#hotbar_logout' },
   { type: 'testId', value: 'admin-nav' },
-  { type: 'role', role: 'navigation' },
-  { type: 'text', value: /log ?out|sign ?out/i },
+  { type: 'text', value: 'User Management', exact: true },
+  { type: 'text', value: 'Lead Management', exact: true },
   { type: 'css', value: '[data-admin], #admin, .admin-container' },
 ];
 
