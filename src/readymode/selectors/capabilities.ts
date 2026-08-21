@@ -38,6 +38,9 @@ export type CapabilityId =
   | 'states'
   | 'campaigns'
   | 'queues'
+  | 'playlists'
+  | 'bulk_license_clear'
+  | 'force_logout'
   | 'save';
 
 export interface CapabilityDefinition {
@@ -124,6 +127,27 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['queues.section', 'queues.save'],
     allowBuiltin: false,
     actionTypes: ['ASSIGN_QUEUES'],
+  },
+  {
+    id: 'playlists',
+    label: 'assign an agent to a playlist',
+    requiredControls: ['playlists.section', 'playlists.save'],
+    allowBuiltin: false,
+    actionTypes: ['ASSIGN_PLAYLIST', 'REMOVE_PLAYLIST'],
+  },
+  {
+    id: 'bulk_license_clear',
+    label: 'log out inactive users',
+    requiredControls: ['users.log_out_inactive'],
+    allowBuiltin: false,
+    actionTypes: ['CLEAR_ALL_LICENSES'],
+  },
+  {
+    id: 'force_logout',
+    label: 'sign a specific user out of Readymode',
+    requiredControls: ['agents.force_logout'],
+    allowBuiltin: false,
+    actionTypes: ['FORCE_LOGOUT'],
   },
   {
     id: 'save',

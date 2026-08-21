@@ -35,6 +35,15 @@ export function requiresSecondApprover(action: Action): boolean {
     case 'SET_DEFAULT_STATES':
       // Changes the baseline for every future agent, so it is a bulk change.
       return true;
+    case 'CLEAR_ALL_LICENSES':
+      // Affects many people at once, but it is Readymode's own control and it
+      // is reversible — anyone logged out can sign back in. One confirmation,
+      // showing how many seats are held, is the proportionate check.
+      return false;
+    case 'FORCE_LOGOUT':
+      // Interrupts one named person mid-work, and optionally locks them out of
+      // the seat, so it needs a second Owner or Administrator.
+      return true;
     default:
       return false;
   }
@@ -51,7 +60,9 @@ export function approvalRequirement(action: Action): ApprovalRequirement {
       reason:
         action.action === 'DEACTIVATE_ACCOUNT'
           ? 'Deactivation requires a second Owner or Administrator.'
-          : 'Bulk changes require a second Owner or Administrator.',
+          : action.action === 'FORCE_LOGOUT'
+            ? 'Signing someone out interrupts their work, so it requires a second Owner or Administrator.'
+            : 'Bulk changes require a second Owner or Administrator.',
     };
   }
   return { required: 1, reason: 'Modifying request requires confirmation.' };

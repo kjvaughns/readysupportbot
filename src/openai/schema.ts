@@ -51,6 +51,22 @@ const newAccountSchema = z.object({
 
 export type NewAccount = z.infer<typeof newAccountSchema>;
 
+/** Readymode playlist membership levels. */
+export const PLAYLIST_LEVELS = ['primary', 'backup', 'tertiary'] as const;
+export const playlistLevelSchema = z.enum(PLAYLIST_LEVELS);
+
+/** Areas the troubleshooting guidance covers. */
+export const TROUBLESHOOT_TOPICS = [
+  'audio',
+  'login',
+  'dialer',
+  'leads',
+  'license',
+  'recording',
+  'other',
+] as const;
+export const troubleshootTopicSchema = z.enum(TROUBLESHOOT_TOPICS);
+
 /** The canonical, validated action the rest of the backend consumes. */
 export const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('CREATE_ACCOUNT'), account: newAccountSchema }),
@@ -59,6 +75,15 @@ export const actionSchema = z.discriminatedUnion('action', [
     accounts: z.array(newAccountSchema).min(1).max(200),
   }),
   z.object({ action: z.literal('CLEAR_LICENSE'), target: agentTargetSchema }),
+  // Readymode's own "log out inactive users" control. It takes no target: the
+  // application decides which sessions are idle.
+  z.object({ action: z.literal('CLEAR_ALL_LICENSES') }),
+  z.object({
+    action: z.literal('FORCE_LOGOUT'),
+    target: agentTargetSchema,
+    /** Also reset the password, so the seat cannot be immediately retaken. */
+    resetPassword: z.boolean().default(false),
+  }),
   z.object({ action: z.literal('RESET_PASSWORD'), target: agentTargetSchema }),
   z.object({ action: z.literal('DEACTIVATE_ACCOUNT'), target: agentTargetSchema }),
   z.object({ action: z.literal('AGENT_STATUS'), target: agentTargetSchema }),
@@ -72,6 +97,23 @@ export const actionSchema = z.discriminatedUnion('action', [
     action: z.literal('ASSIGN_QUEUES'),
     target: agentTargetSchema,
     queues: z.array(z.string().min(1).max(128)).min(1).max(50),
+  }),
+  z.object({ action: z.literal('VIEW_PLAYLISTS'), target: agentTargetSchema.optional() }),
+  z.object({
+    action: z.literal('ASSIGN_PLAYLIST'),
+    target: agentTargetSchema,
+    playlists: z.array(z.string().min(1).max(128)).min(1).max(50),
+    level: playlistLevelSchema.default('primary'),
+  }),
+  z.object({
+    action: z.literal('REMOVE_PLAYLIST'),
+    target: agentTargetSchema,
+    playlists: z.array(z.string().min(1).max(128)).min(1).max(50),
+  }),
+  z.object({
+    action: z.literal('TROUBLESHOOT'),
+    topic: troubleshootTopicSchema,
+    question: z.string().min(1).max(500),
   }),
   z.object({ action: z.literal('VIEW_STATES'), target: agentTargetSchema }),
   z.object({ action: z.literal('SET_STATES'), target: agentTargetSchema, states: stateArraySchema }),
@@ -117,6 +159,11 @@ export const modelOutputSchema = z.object({
     )
     .nullable()
     .optional(),
+  playlists: z.array(z.string()).nullable().optional(),
+  level: z.string().nullable().optional(),
+  topic: z.string().nullable().optional(),
+  question: z.string().nullable().optional(),
+  resetPassword: z.boolean().nullable().optional(),
   limit: z.number().nullable().optional(),
   /** Set when the request cannot be mapped without more information. */
   clarification: z.string().nullable().optional(),
@@ -139,6 +186,11 @@ export const OPENAI_JSON_SCHEMA = {
       'states',
       'campaigns',
       'queues',
+      'playlists',
+      'level',
+      'topic',
+      'question',
+      'resetPassword',
       'accounts',
       'limit',
       'clarification',
@@ -151,6 +203,14 @@ export const OPENAI_JSON_SCHEMA = {
       states: { type: ['array', 'null'], items: { type: 'string' } },
       campaigns: { type: ['array', 'null'], items: { type: 'string' } },
       queues: { type: ['array', 'null'], items: { type: 'string' } },
+      playlists: { type: ['array', 'null'], items: { type: 'string' } },
+      level: { type: ['string', 'null'], enum: ['primary', 'backup', 'tertiary', null] },
+      topic: {
+        type: ['string', 'null'],
+        enum: ['audio', 'login', 'dialer', 'leads', 'license', 'recording', 'other', null],
+      },
+      question: { type: ['string', 'null'] },
+      resetPassword: { type: ['boolean', 'null'] },
       accounts: {
         type: ['array', 'null'],
         items: {
@@ -263,6 +323,12 @@ export function buildAction(raw: ModelOutput): ParsedIntent {
       candidate.accounts = raw.accounts.map(compactAccount);
       break;
     }
+    case 'FORCE_LOGOUT': {
+      if (!target) return needsInfo('Which user should be signed out of Readymode?');
+      candidate.target = target;
+      candidate.resetPassword = raw.resetPassword ?? false;
+      break;
+    }
     case 'CLEAR_LICENSE':
     case 'RESET_PASSWORD':
     case 'DEACTIVATE_ACCOUNT':
@@ -279,6 +345,34 @@ export function buildAction(raw: ModelOutput): ParsedIntent {
       }
       candidate.target = target;
       candidate.campaigns = raw.campaigns;
+      break;
+    }
+    case 'VIEW_PLAYLISTS': {
+      if (target) candidate.target = target;
+      break;
+    }
+    case 'ASSIGN_PLAYLIST': {
+      if (!target) return needsInfo('Which agent should be assigned to the playlist?');
+      if (!raw.playlists || raw.playlists.length === 0) {
+        return needsInfo('Which playlist should they be assigned to?');
+      }
+      candidate.target = target;
+      candidate.playlists = raw.playlists;
+      candidate.level = raw.level ?? 'primary';
+      break;
+    }
+    case 'REMOVE_PLAYLIST': {
+      if (!target) return needsInfo('Which agent should be removed from the playlist?');
+      if (!raw.playlists || raw.playlists.length === 0) {
+        return needsInfo('Which playlist should they be removed from?');
+      }
+      candidate.target = target;
+      candidate.playlists = raw.playlists;
+      break;
+    }
+    case 'TROUBLESHOOT': {
+      candidate.topic = raw.topic ?? 'other';
+      candidate.question = raw.question ?? 'Something is not working.';
       break;
     }
     case 'ASSIGN_QUEUES': {

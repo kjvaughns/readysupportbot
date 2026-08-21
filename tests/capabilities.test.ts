@@ -104,7 +104,7 @@ describe('action to capability mapping', () => {
     expect(capabilityForAction('LICENSE_USAGE')?.allowBuiltin).toBe(true);
   });
 
-  it('covers the eleven capability groups the connection test reports', () => {
+  it('covers every capability group the connection test reports', () => {
     expect(CAPABILITIES.map((entry) => entry.id)).toEqual([
       'login',
       'agent_search',
@@ -116,7 +116,18 @@ describe('action to capability mapping', () => {
       'states',
       'campaigns',
       'queues',
+      'playlists',
+      'bulk_license_clear',
+      'force_logout',
       'save',
     ]);
+  });
+
+  it('will not log out inactive users on a guessed selector', () => {
+    const [bulk] = capabilityStatuses([
+      status({ control: 'users.log_out_inactive', source: 'builtin' }),
+    ]).filter((entry) => entry.capability === 'bulk_license_clear');
+
+    expect(bulk.usable).toBe(false);
   });
 });

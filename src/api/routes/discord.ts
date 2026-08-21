@@ -5,7 +5,8 @@ import { requireAccess, requireRole } from '../../auth';
 import { getClient, isDiscordConfigured } from '../../discord/client';
 import { getStore } from '../../database';
 import { recordEvent } from '../../audit';
-import { roleSchema } from '../../types';
+import { ACTION_TYPES, roleSchema } from '../../types';
+import { getActionRoles, setActionRole } from '../../permissions/overrides';
 import { DependencyNotConfiguredError, NotFoundError, ValidationError } from '../../security/errors';
 import { sanitizePageValue } from '../../security/sanitize';
 
@@ -166,6 +167,42 @@ export async function discordRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return { mappings, available };
+  });
+
+  /**
+   * Which ReadySupport role each action needs.
+   *
+   * The role-to-permission table is the floor; this raises the bar for a
+   * specific action without a deploy — for example requiring an Administrator
+   * to create accounts, or to assign playlists.
+   */
+  app.get('/permissions/actions', async (request) => {
+    const context = await requireAccess(request, 'view_activity');
+    return { actionRoles: await getActionRoles(context.organizationId) };
+  });
+
+  app.post('/permissions/actions', async (request) => {
+    const context = await requireRole(request, ['owner']);
+    const body = z
+      .object({
+        action: z.enum(ACTION_TYPES),
+        // null clears the override and falls back to the permission table.
+        role: roleSchema.nullable(),
+      })
+      .parse(request.body ?? {});
+
+    const actionRoles = await setActionRole(context.organizationId, body.action, body.role);
+
+    await recordEvent({
+      organizationId: context.organizationId,
+      type: 'connection.updated',
+      message: body.role
+        ? `${body.action} now requires the ${body.role} role or above.`
+        : `${body.action} reverted to the default role requirement.`,
+      data: { action: body.action, role: body.role },
+    });
+
+    return { actionRoles };
   });
 
   /** Maps a Discord role, or a specific Discord user, to a ReadySupport role. */

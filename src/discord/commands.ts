@@ -7,6 +7,7 @@ import {
 import { Action, AgentTarget, actionSchema } from '../openai/schema';
 import { normalizeStateList } from '../readymode/states';
 import { config } from '../config';
+import { detectTopic } from '../knowledge/troubleshooting';
 
 /**
  * Slash commands. These bypass the language model entirely: options map
@@ -78,6 +79,72 @@ export const commandBuilders: Array<
       .setName('agent_status')
       .setDescription('Check whether an agent is logged in.'),
   ),
+
+  new SlashCommandBuilder()
+    .setName('clear-licenses')
+    .setDescription("Log out inactive Readymode users, freeing the seats they hold."),
+
+  agentOption(
+    new SlashCommandBuilder()
+      .setName('force-logout')
+      .setDescription('Sign a specific user out of Readymode. Needs a second approver.'),
+  ).addBooleanOption((option) =>
+    option
+      .setName('reset_password')
+      .setDescription('Also reset their password so the seat cannot be retaken.'),
+  ),
+
+  agentOption(
+    new SlashCommandBuilder()
+      .setName('add-assignment')
+      .setDescription('Assign an agent to a playlist (lead pool).'),
+  )
+    .addStringOption((option) =>
+      option
+        .setName('playlists')
+        .setDescription('Playlist names, comma separated.')
+        .setRequired(true)
+        .setMaxLength(500),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('level')
+        .setDescription('Membership level. Defaults to primary.')
+        .addChoices(
+          { name: 'Primary', value: 'primary' },
+          { name: 'Backup', value: 'backup' },
+          { name: 'Tertiary', value: 'tertiary' },
+        ),
+    ),
+
+  agentOption(
+    new SlashCommandBuilder()
+      .setName('remove-assignment')
+      .setDescription('Remove an agent from a playlist (lead pool).'),
+  ).addStringOption((option) =>
+    option
+      .setName('playlists')
+      .setDescription('Playlist names, comma separated.')
+      .setRequired(true)
+      .setMaxLength(500),
+  ),
+
+  agentOption(
+    new SlashCommandBuilder()
+      .setName('view-assignments')
+      .setDescription('See which playlists an agent is in.'),
+  ),
+
+  new SlashCommandBuilder()
+    .setName('troubleshoot')
+    .setDescription('Get help with audio, login, dialing, leads, licences or recordings.')
+    .addStringOption((option) =>
+      option
+        .setName('problem')
+        .setDescription('Describe what is not working, for example "no audio on calls".')
+        .setRequired(true)
+        .setMaxLength(400),
+    ),
 
   new SlashCommandBuilder()
     .setName('license_usage')
@@ -213,6 +280,46 @@ export function commandToAction(interaction: ChatInputCommandInteraction): Comma
 
     case 'clear_license':
       return finish({ action: 'CLEAR_LICENSE', target: targetFrom(interaction) });
+    case 'clear-licenses':
+      return finish({ action: 'CLEAR_ALL_LICENSES' });
+    case 'force-logout':
+      return finish({
+        action: 'FORCE_LOGOUT',
+        target: targetFrom(interaction),
+        resetPassword: interaction.options.getBoolean('reset_password') ?? false,
+      });
+
+    case 'add-assignment':
+    case 'remove-assignment': {
+      const playlists = interaction.options
+        .getString('playlists', true)
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+      if (playlists.length === 0) {
+        return { status: 'needs_information', message: 'Name at least one playlist.' };
+      }
+
+      return finish(
+        name === 'add-assignment'
+          ? {
+              action: 'ASSIGN_PLAYLIST',
+              target: targetFrom(interaction),
+              playlists,
+              level: interaction.options.getString('level') ?? 'primary',
+            }
+          : { action: 'REMOVE_PLAYLIST', target: targetFrom(interaction), playlists },
+      );
+    }
+
+    case 'view-assignments':
+      return finish({ action: 'VIEW_PLAYLISTS', target: targetFrom(interaction) });
+
+    case 'troubleshoot': {
+      const problem = interaction.options.getString('problem', true);
+      return finish({ action: 'TROUBLESHOOT', topic: detectTopic(problem), question: problem });
+    }
     case 'reset_password':
       return finish({ action: 'RESET_PASSWORD', target: targetFrom(interaction) });
     case 'deactivate_account':

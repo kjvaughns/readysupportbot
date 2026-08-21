@@ -2,7 +2,9 @@ import { config } from '../config';
 import { getStore } from '../database';
 import { recordEvent } from '../audit';
 import { Action, actionSchema } from '../openai/schema';
-import { isModifyingAction, requireActionPermission } from '../permissions';
+import { isModifyingAction } from '../permissions';
+import { getActionRoles, checkActionAccess } from '../permissions/overrides';
+import { answerTroubleshooting } from '../knowledge/troubleshooting';
 import { approvalRequirement, awaitingSinceFrom, submitApproval } from '../approvals';
 import { assertTransition } from '../queue';
 import {
@@ -62,16 +64,25 @@ export async function handleAction(input: {
     return { content: escapeDiscord(action.reason) };
   }
 
-  try {
-    requireActionPermission(context.role, action.action);
-  } catch (error) {
+  // Permission plus any per-action minimum role the organization configured.
+  const access = checkActionAccess(
+    context.role,
+    action.action,
+    await getActionRoles(context.organizationId),
+  );
+  if (!access.allowed) {
     await recordEvent({
       organizationId: context.organizationId,
       type: 'permission.denied',
       message: `A ${context.role} attempted ${action.action}.`,
-      data: { discordUserId: context.discordUserId },
+      data: { discordUserId: context.discordUserId, reason: access.reason },
     });
-    return { content: toSafeMessage(error) };
+    return { content: access.reason };
+  }
+
+  if (action.action === 'TROUBLESHOOT') {
+    const answer = answerTroubleshooting(action.topic, action.question);
+    return { content: escapeDiscord(answer.body).slice(0, 1900) };
   }
 
   if (action.action === 'CONNECTION_STATUS') return connectionStatusReply(context);

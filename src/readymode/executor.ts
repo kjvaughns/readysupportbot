@@ -28,6 +28,8 @@ import {
   runResetPasswordWorkflow,
 } from './workflows/accounts';
 import { runAssignCampaignsWorkflow, runAssignQueuesWorkflow } from './workflows/assignments';
+import { runClearAllLicensesWorkflow, runForceLogoutWorkflow } from './workflows/licenses';
+import { runPlaylistWorkflow, runViewPlaylistsWorkflow } from './workflows/playlists';
 import { runStateWorkflow, runViewStatesWorkflow } from './workflows/states';
 
 /**
@@ -236,6 +238,40 @@ async function dispatch(
     case 'CLEAR_LICENSE':
       return runClearLicenseWorkflow(wf, {
         agent: await resolveTarget(wf, action.target, context.actorDiscordUserId),
+      });
+
+    case 'CLEAR_ALL_LICENSES':
+      // No target: Readymode's own control decides which sessions are idle.
+      return runClearAllLicensesWorkflow(wf);
+
+    case 'FORCE_LOGOUT':
+      return runForceLogoutWorkflow(wf, {
+        agent: await resolveTarget(wf, action.target, context.actorDiscordUserId),
+        resetPassword: action.resetPassword,
+      });
+
+    case 'VIEW_PLAYLISTS':
+      return runViewPlaylistsWorkflow(wf, {
+        agent: await resolveTarget(
+          wf,
+          action.target ?? { kind: 'self' },
+          context.actorDiscordUserId,
+        ),
+      });
+
+    case 'ASSIGN_PLAYLIST':
+      return runPlaylistWorkflow(wf, {
+        agent: await resolveTarget(wf, action.target, context.actorDiscordUserId),
+        playlists: action.playlists,
+        level: action.level,
+        operation: 'assign',
+      });
+
+    case 'REMOVE_PLAYLIST':
+      return runPlaylistWorkflow(wf, {
+        agent: await resolveTarget(wf, action.target, context.actorDiscordUserId),
+        playlists: action.playlists,
+        operation: 'remove',
       });
 
     case 'RESET_PASSWORD':
@@ -475,6 +511,16 @@ export function describeAction(action: Action): string {
       return `Create ${action.accounts.length} accounts`;
     case 'CLEAR_LICENSE':
       return 'Clear an agent license';
+    case 'CLEAR_ALL_LICENSES':
+      return 'Log out inactive Readymode users';
+    case 'FORCE_LOGOUT':
+      return action.resetPassword
+        ? 'Sign a user out of Readymode and reset their password'
+        : 'Sign a user out of Readymode';
+    case 'ASSIGN_PLAYLIST':
+      return `Assign to playlist(s): ${action.playlists.join(', ')}`;
+    case 'REMOVE_PLAYLIST':
+      return `Remove from playlist(s): ${action.playlists.join(', ')}`;
     case 'RESET_PASSWORD':
       return 'Reset an agent password';
     case 'DEACTIVATE_ACCOUNT':

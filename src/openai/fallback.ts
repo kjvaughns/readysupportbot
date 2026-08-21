@@ -1,5 +1,6 @@
 import { ModelOutput } from './schema';
 import { normalizeStateList } from '../readymode/states';
+import { detectTopic } from '../knowledge/troubleshooting';
 
 /**
  * Deterministic parser used when OpenAI is not configured, and as a safety net
@@ -63,6 +64,11 @@ function emptyOutput(action: ModelOutput['action']): ModelOutput {
     limit: null,
     clarification: null,
     reason: null,
+    playlists: null,
+    level: null,
+    topic: null,
+    question: null,
+    resetPassword: null,
   };
 }
 
@@ -91,6 +97,54 @@ export function fallbackParse(message: string): ModelOutput {
 
   if (/\blicense usage\b|\bwho('s| is) using (a )?licen[cs]e/.test(lower)) {
     return emptyOutput('LICENSE_USAGE');
+  }
+
+  // Bulk seat release: Readymode's own "log out inactive users" control.
+  if (
+    /\blog\s?out\s+(?:all\s+)?inactive\b|\bclear\s+(?:all\s+|the\s+)?licen[cs]es\b|\bfree\s+up\s+(?:some\s+)?seats?\b|\bout of seats?\b/.test(
+      lower,
+    )
+  ) {
+    return emptyOutput('CLEAR_ALL_LICENSES');
+  }
+
+  if (/\b(?:log|sign)\s?out\b/.test(lower) && !/\binactive\b/.test(lower)) {
+    const output = emptyOutput('FORCE_LOGOUT');
+    output.target = targetFrom(text);
+    output.resetPassword = /\breset\b[\s\S]*\bpassword\b|\bchange\b[\s\S]*\bpassword\b/.test(lower);
+    if (!output.target) output.clarification = 'Who should be signed out of Readymode?';
+    return output;
+  }
+
+  // Assignments — "lead pool" is how people refer to a playlist.
+  if (/\bplaylist|lead pool|assignment/.test(lower)) {
+    const removing = /\b(remove|take (?:them |him |her )?off|unassign)\b/.test(lower);
+    const viewing = /\b(what|which|view|show|see)\b/.test(lower) && !removing;
+
+    if (viewing) {
+      const output = emptyOutput('VIEW_PLAYLISTS');
+      output.target = targetFrom(text);
+      return output;
+    }
+
+    const output = emptyOutput(removing ? 'REMOVE_PLAYLIST' : 'ASSIGN_PLAYLIST');
+    output.target = targetFrom(text);
+    output.clarification = removing
+      ? 'Which playlist should they be removed from?'
+      : 'Which playlist should they be assigned to?';
+    return output;
+  }
+
+  // Troubleshooting: someone describing a problem rather than requesting a change.
+  if (
+    /\b(not working|isn'?t working|no audio|can'?t hear|cannot hear|no sound|mic(?:rophone)?\b|headset|can'?t log ?in|cannot log ?in|not receiving|no leads?|troubleshoot|help me with|having (?:an? )?(?:issue|problem|trouble))\b/.test(
+      lower,
+    )
+  ) {
+    const output = emptyOutput('TROUBLESHOOT');
+    output.topic = detectTopic(text);
+    output.question = text.slice(0, 400);
+    return output;
   }
 
   if (/\bdefault states\b|\bdefault for new agents\b/.test(lower)) {
@@ -141,7 +195,7 @@ export function fallbackParse(message: string): ModelOutput {
     return output;
   }
 
-  if (/\bclear\b[\s\S]*\blicen[cs]e\b/.test(lower)) {
+  if (/\bclear\b[\s\S]*\blicen[cs]es?\b/.test(lower)) {
     const output = emptyOutput('CLEAR_LICENSE');
     output.target = targetFrom(text);
     if (!output.target) output.clarification = 'Whose license should I clear?';

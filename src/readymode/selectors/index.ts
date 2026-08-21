@@ -126,6 +126,22 @@ export const AGENT_CONTROLS = {
     { type: 'testId', value: 'deactivate-agent' },
     { type: 'role', role: 'button', name: /deactivate|disable|suspend/i },
   ]),
+  /**
+   * Readymode's own control for releasing idle sessions, on the Users screen.
+   * The label here was supplied by an operator who uses it, so it is a reported
+   * observation rather than a guess — but it still has to resolve uniquely in
+   * the real interface before any workflow will click it.
+   */
+  logOutInactive: control('users.log_out_inactive', 'Log Out Inactive Users button on the Users screen', [
+    { type: 'testId', value: 'log-out-inactive' },
+    { type: 'role', role: 'button', name: /log\s?out\s+inactive(\s+users)?/i },
+    { type: 'text', value: /log\s?out\s+inactive(\s+users)?/i },
+    { type: 'css', value: 'input[type="submit"][value*="Inactive" i]' },
+  ]),
+  forceLogout: control('agents.force_logout', 'Control that signs one agent out of Readymode', [
+    { type: 'testId', value: 'force-logout' },
+    { type: 'role', role: 'button', name: /log\s?out|sign\s?out|force\s?logout|end\s+session/i },
+  ]),
   saveButton: control('agents.save', 'Save button on the agent detail form', [
     { type: 'testId', value: 'save-agent' },
     { type: 'role', role: 'button', name: /^\s*(save|update|apply)\s*$/i },
@@ -192,6 +208,18 @@ export const CAMPAIGN_CONTROLS = {
   ]),
 } as const;
 
+export const PLAYLIST_CONTROLS = {
+  section: control('playlists.section', 'Playlist membership section on an agent', [
+    { type: 'testId', value: 'agent-playlists' },
+    { type: 'role', role: 'group', name: /playlists?|lead pools?/i },
+    { type: 'css', value: '[data-field="playlists"]' },
+  ]),
+  save: control('playlists.save', 'Save button for playlist membership', [
+    { type: 'testId', value: 'save-playlists' },
+    { type: 'role', role: 'button', name: /save|update|apply/i },
+  ]),
+} as const;
+
 export const QUEUE_CONTROLS = {
   section: control('queues.section', 'Queue assignment section', [
     { type: 'testId', value: 'agent-queues' },
@@ -243,5 +271,6 @@ export const ALL_CONTROLS: ControlDefinition[] = [
   ...Object.values(STATE_CONTROLS),
   ...Object.values(CAMPAIGN_CONTROLS),
   ...Object.values(QUEUE_CONTROLS),
+  ...Object.values(PLAYLIST_CONTROLS),
   ...Object.values(LICENSE_CONTROLS),
 ];
