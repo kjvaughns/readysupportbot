@@ -4,35 +4,78 @@ import { sanitizePageValue } from '../security/sanitize';
 import { LocatorRoot, listSearchRoots, rootName } from './selectors/frames';
 import { countVisible } from './selectors/discovery';
 import type { RootEvidence } from './discovery/evidence';
+import { DASHBOARD_ROUTE, routeUrl } from './interface/registry';
 
 /**
  * Navigating Readymode Starter.
  *
- * Starter is a legacy single-page application. Once signed in the address stays
- * at `https://<tenant>.readymode.com/#` and every administrative screen opens as
- * a movable panel inside that one page. There are no `/admin/users` or
- * `/admin/licenses` routes to navigate to, and the URL does not change when a
- * panel opens — so a URL can neither be used to reach a screen nor to confirm
- * that the screen arrived.
+ * Two things are true at once here, and the code has to hold both.
  *
- * What does work is the panel's own heading. "User Management", "License Usage",
- * "Lead Management", "Edit Queue", "Campaign Settings" and "Lead Playlist Editor"
- * are the interface's own statement of where the session is, and they are the
- * only reliable one. They also disambiguate controls that share a label: a
- * "Save" inside the Lead Playlist Editor is a different control from a "Save"
- * inside Edit Queue, and nothing but the surrounding panel says which is which.
+ * Starter does have routes. The read-only inspection recorded them —
+ * `-Team/ManageUsers`, `+Team/ManageLicenses`, `-AI Leads/pools`,
+ * `+Communication/Queue={id}` — and going to one opens that screen. So
+ * navigation goes by route first: it is direct, and it does not depend on a
+ * label being visible from wherever the session happens to be.
+ *
+ * But a route arriving is not the same as a screen opening. Starter renders
+ * administrative screens as panels inside a shell, and a route that fails to
+ * open one leaves the address looking exactly right. So arrival is never
+ * confirmed by the URL. It is confirmed by the panel's own heading — "User
+ * Management", "License Usage", "Lead Management", "Edit Queue", "Campaign
+ * Settings", "Lead Playlist Editor" — which is the interface's own statement of
+ * where the session is. When the route does not produce the heading, the exact
+ * label is clicked instead, and the heading is checked again.
+ *
+ * Headings do a second job: they tell apart controls that share a label. A
+ * "Save" inside the Lead Playlist Editor is not the "Save" inside Edit Queue,
+ * and nothing but the surrounding panel says which is which.
  */
 
-/** The authenticated application root. Starter never leaves it. */
-export const APP_ROOT_PATH = '/#';
-
-/** The application root for a given tenant URL. */
+/** The screen every route starts from. */
 export function appRootUrl(anyTenantUrl: string): string {
   try {
-    return new URL(APP_ROOT_PATH, new URL(anyTenantUrl).origin).toString();
+    return routeUrl(anyTenantUrl, DASHBOARD_ROUTE);
   } catch {
-    return APP_ROOT_PATH;
+    return anyTenantUrl;
   }
+}
+
+/**
+ * Goes to a route, then reports whether the expected screen actually appeared.
+ *
+ * The return value is deliberately not "did the navigation succeed". A legacy
+ * shell answers 200 and renders its own error inside the page, so the only
+ * useful question is whether the heading arrived.
+ */
+export async function gotoRoute(
+  page: Page,
+  route: string,
+  expectHeadings: readonly string[],
+  options: { timeoutMs?: number } = {},
+): Promise<OpenPanelResult> {
+  let destination: string;
+  try {
+    destination = routeUrl(page.url(), route);
+  } catch {
+    return { opened: false, heading: null, reason: 'The organization base URL could not be read.' };
+  }
+
+  try {
+    await page.goto(destination, { waitUntil: 'domcontentloaded' });
+  } catch {
+    return { opened: false, heading: null, reason: `The route ${route} could not be reached.` };
+  }
+
+  if (expectHeadings.length === 0) return { opened: true, heading: null };
+
+  const heading = await waitForHeading(page, expectHeadings, options.timeoutMs ?? 12_000);
+  if (heading) return { opened: true, heading };
+
+  return {
+    opened: false,
+    heading: null,
+    reason: `The route ${route} loaded but none of the expected headings appeared (${expectHeadings.join(', ')}).`,
+  };
 }
 
 /**
@@ -42,6 +85,8 @@ export function appRootUrl(anyTenantUrl: string): string {
  * still recorded as evidence; it simply does not identify a known panel.
  */
 export const PANEL_HEADINGS = [
+  // Specific screens first: `detectPanelState` returns the first match, and the
+  // shell's own headings are the least informative answer to "where am I".
   'User Management',
   'License Usage',
   'Lead Management',
@@ -50,6 +95,8 @@ export const PANEL_HEADINGS = [
   'Lead Playlist Editor',
   'Account Settings',
   'Activity Log',
+  'Settings',
+  'Dashboard',
 ] as const;
 
 export type PanelHeading = (typeof PANEL_HEADINGS)[number];
@@ -71,8 +118,10 @@ export const HEADING_SELECTOR =
  */
 export const APPROVED_PANEL_LABELS = [
   'Users',
+  'User Management',
   'License Usage',
   'Leads',
+  'Lead Management',
   'View Lead Pool',
   'Queues',
   'Campaigns',
@@ -352,6 +401,10 @@ export interface PanelStep {
   kind: 'nav' | 'tab' | 'record';
   /** Exact visible label. Absent for a `record` step, which has no fixed label. */
   label?: string;
+  /** Other exact labels the same destination is known by. */
+  altLabels?: string[];
+  /** The inspected route, when the screen has one. Tried before the label. */
+  route?: string;
   /** Any one of these headings confirms the step arrived. */
   expectHeadings: string[];
   /** A step that may legitimately not exist; the route continues without it. */
@@ -378,7 +431,13 @@ export const STARTER_ROUTES: PanelRoute[] = [
     id: 'users',
     description: 'User Management, one user record, and that record\'s Account Settings tab',
     steps: [
-      { kind: 'nav', label: 'Users', expectHeadings: ['User Management'] },
+      {
+        kind: 'nav',
+        label: 'User Management',
+        altLabels: ['Users'],
+        route: '-Team/ManageUsers',
+        expectHeadings: ['User Management'],
+      },
       { kind: 'record', expectHeadings: ['Account Settings', 'Activity Log', 'User Management'] },
       { kind: 'tab', label: 'Account Settings', expectHeadings: ['Account Settings'], optional: true },
     ],
@@ -386,13 +445,26 @@ export const STARTER_ROUTES: PanelRoute[] = [
   {
     id: 'licenses',
     description: 'License Usage, including the agent and admin licence tables',
-    steps: [{ kind: 'nav', label: 'License Usage', expectHeadings: ['License Usage'] }],
+    steps: [
+      {
+        kind: 'nav',
+        label: 'License Usage',
+        route: '+Team/ManageLicenses',
+        expectHeadings: ['License Usage'],
+      },
+    ],
   },
   {
     id: 'queues',
     description: 'Lead Management, the Queues tab, and one queue\'s editor',
     steps: [
-      { kind: 'nav', label: 'Leads', expectHeadings: ['Lead Management'] },
+      {
+        kind: 'nav',
+        label: 'Lead Management',
+        altLabels: ['Leads'],
+        route: '-AI Leads/pools',
+        expectHeadings: ['Lead Management'],
+      },
       { kind: 'tab', label: 'Queues', expectHeadings: ['Lead Management'] },
       { kind: 'record', expectHeadings: ['Edit Queue'] },
       { kind: 'tab', label: 'Members', expectHeadings: ['Edit Queue'], optional: true },
@@ -403,7 +475,14 @@ export const STARTER_ROUTES: PanelRoute[] = [
     id: 'campaigns',
     description: 'The Campaigns tab of Lead Management',
     steps: [
-      { kind: 'nav', label: 'Leads', expectHeadings: ['Lead Management'], capture: false },
+      {
+        kind: 'nav',
+        label: 'Lead Management',
+        altLabels: ['Leads'],
+        route: '-AI Leads/pools',
+        expectHeadings: ['Lead Management'],
+        capture: false,
+      },
       { kind: 'tab', label: 'Campaigns', expectHeadings: ['Lead Management', 'Campaign Settings'] },
     ],
   },
@@ -463,7 +542,7 @@ export async function openFirstRecord(
   for (const root of listSearchRoots(page)) {
     let rows: Locator;
     try {
-      rows = root.locator('table tr');
+      rows = root.locator('table').locator('tr');
     } catch {
       continue;
     }
@@ -550,20 +629,75 @@ export async function findControlInRow(
   return found.length === 1 ? found[0] : null;
 }
 
+/**
+ * Carries out one step of a walk: route first, then each label it is known by.
+ *
+ * Every attempt has to end with the expected heading on screen. A route that
+ * loads without opening the screen counts as not having worked, and the next
+ * approach is tried.
+ */
+export async function openStep(
+  page: Page,
+  step: PanelStep,
+  options: { timeoutMs?: number } = {},
+): Promise<OpenPanelResult> {
+  const timeoutMs = options.timeoutMs ?? 12_000;
+  if (step.kind === 'record') return openFirstRecord(page, step.expectHeadings, { timeoutMs });
+
+  const already = await findVisibleHeading(page, step.expectHeadings, 250);
+  if (already && step.kind === 'nav') return { opened: true, heading: already };
+
+  if (step.route) {
+    const byRoute = await gotoRoute(page, step.route, step.expectHeadings, {
+      timeoutMs: Math.min(timeoutMs, 5000),
+    });
+    if (byRoute.opened) return byRoute;
+  }
+
+  let last: OpenPanelResult = {
+    opened: false,
+    heading: null,
+    reason: 'The step named no label to click.',
+  };
+
+  for (const label of [step.label, ...(step.altLabels ?? [])].filter(Boolean) as string[]) {
+    last = await openPanelByLabel(page, label, step.expectHeadings, { timeoutMs });
+    if (last.opened) return last;
+  }
+
+  return last;
+}
+
 /** Known panels, by the label that opens them and the heading that confirms them. */
 export type PanelId = 'users' | 'licenses' | 'leads' | 'queues' | 'campaigns';
 
 export interface PanelTarget {
   label: string;
   headings: string[];
+  /** The inspected route, when the screen has one of its own. */
+  route?: string;
   /** A tab only exists once its panel is open. */
   parent?: PanelId;
 }
 
 export const PANELS: Record<PanelId, PanelTarget> = {
-  users: { label: 'Users', headings: ['User Management'] },
-  licenses: { label: 'License Usage', headings: ['License Usage'] },
-  leads: { label: 'Leads', headings: ['Lead Management'] },
+  users: {
+    label: 'User Management',
+    route: '-Team/ManageUsers',
+    headings: ['User Management'],
+  },
+  licenses: {
+    label: 'License Usage',
+    route: '+Team/ManageLicenses',
+    headings: ['License Usage'],
+  },
+  leads: {
+    label: 'Lead Management',
+    route: '-AI Leads/pools',
+    headings: ['Lead Management'],
+  },
+  // Tabs, not screens: they have no route of their own and only exist once
+  // Lead Management is open.
   queues: { label: 'Queues', headings: ['Lead Management', 'Edit Queue'], parent: 'leads' },
   campaigns: {
     label: 'Campaigns',
@@ -573,30 +707,55 @@ export const PANELS: Record<PanelId, PanelTarget> = {
 };
 
 /**
- * Opens a panel, opening its parent panel first when it is a tab.
+ * Opens a panel: by route when it has one, by its exact label when it does not
+ * or when the route did not produce the expected heading.
  *
- * Retries once from the application root: a label that is not reachable from
- * inside whichever panel happens to be open usually is from the root.
+ * A tab's parent screen is opened first, because a tab does not exist until it
+ * does.
  */
-export async function openPanel(page: Page, panel: PanelId): Promise<OpenPanelResult> {
+export async function openPanel(
+  page: Page,
+  panel: PanelId,
+  options: { timeoutMs?: number } = {},
+): Promise<OpenPanelResult> {
   const target = PANELS[panel];
+  const timeoutMs = options.timeoutMs ?? 12_000;
+
+  // Already open. Clicking again would toggle a panel shut.
+  const already = await findVisibleHeading(page, target.headings, 250);
+  if (already) return { opened: true, heading: already };
 
   if (target.parent) {
-    const parent = await openPanel(page, target.parent);
+    const parent = await openPanel(page, target.parent, options);
     if (!parent.opened) return parent;
   }
 
-  const first = await openPanelByLabel(page, target.label, target.headings);
-  if (first.opened) return first;
+  if (target.route) {
+    // A shorter wait than the label attempt gets: a route either renders its
+    // screen or it does not, and there is a second approach to try.
+    const byRoute = await gotoRoute(page, target.route, target.headings, {
+      timeoutMs: Math.min(timeoutMs, 5000),
+    });
+    if (byRoute.opened) return byRoute;
+    logger.debug(
+      { panel, route: target.route, reason: byRoute.reason },
+      'Route did not open the panel; falling back to its label',
+    );
+  }
 
+  const byLabel = await openPanelByLabel(page, target.label, target.headings, { timeoutMs });
+  if (byLabel.opened) return byLabel;
+
+  // A label that is not reachable from inside whichever panel happens to be
+  // open usually is from the dashboard.
   await returnToAppRoot(page, appRootUrl(page.url()));
 
   if (target.parent) {
-    const parent = await openPanel(page, target.parent);
+    const parent = await openPanel(page, target.parent, options);
     if (!parent.opened) return parent;
   }
 
-  return openPanelByLabel(page, target.label, target.headings);
+  return openPanelByLabel(page, target.label, target.headings, { timeoutMs });
 }
 
 /**

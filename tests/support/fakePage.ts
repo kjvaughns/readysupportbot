@@ -1,10 +1,12 @@
 /**
  * A minimal fake of the Playwright surface this codebase actually uses.
  *
- * Two things make it worth having: frames can be modelled explicitly, so the
- * frame-aware resolution can be tested without a browser; and every interaction
- * is recorded, so a test can assert that a read-only code path really did not
- * click, fill or submit anything.
+ * Three things make it worth having. Frames can be modelled explicitly, so
+ * frame-aware resolution can be tested without a browser. Every interaction is
+ * recorded, so a test can assert that a read-only code path really did not
+ * click, fill or submit anything. And screens can change — by navigating to a
+ * route or by clicking something — which is the only way to test that arrival
+ * is confirmed by what appears on screen rather than by the address.
  */
 
 export interface FakeElement {
@@ -20,6 +22,10 @@ export interface FakeElement {
   visible?: boolean;
   attributes?: Record<string, string>;
   checked?: boolean;
+  /** Screen this element switches to when clicked. */
+  opens?: string;
+  /** Elements nested inside this one, reachable through `locator()`. */
+  children?: FakeElement[];
 }
 
 export interface FakeRootSpec {
@@ -53,10 +59,20 @@ export function mutationsIn(log: InteractionLog): string[] {
   return log.calls.filter((call) => MUTATING_METHODS.has(call.method)).map((call) => call.method);
 }
 
+export function navigationsIn(log: InteractionLog): string[] {
+  return log.calls.filter((call) => call.method === 'goto').map((call) => call.detail ?? '');
+}
+
 function matchesValue(actual: string | undefined, expected: string | RegExp, exact?: boolean): boolean {
   if (actual === undefined) return false;
   if (expected instanceof RegExp) return expected.test(actual);
   return exact ? actual === expected : actual.includes(expected);
+}
+
+function textOf(element: FakeElement): string {
+  const own = element.text ?? element.name ?? '';
+  const nested = (element.children ?? []).map(textOf).join(' ');
+  return [own, nested].filter(Boolean).join(' ');
 }
 
 class FakeLocator {
@@ -64,18 +80,32 @@ class FakeLocator {
     private readonly elements: FakeElement[],
     private readonly log: InteractionLog,
     private readonly description: string,
+    private readonly onNavigate: (screen: string) => void = () => undefined,
   ) {}
+
+  private derive(elements: FakeElement[], description: string): FakeLocator {
+    return new FakeLocator(elements, this.log, description, this.onNavigate);
+  }
 
   async count(): Promise<number> {
     return this.elements.length;
   }
 
   first(): FakeLocator {
-    return new FakeLocator(this.elements.slice(0, 1), this.log, this.description);
+    return this.derive(this.elements.slice(0, 1), this.description);
   }
 
   nth(index: number): FakeLocator {
-    return new FakeLocator(this.elements.slice(index, index + 1), this.log, this.description);
+    return this.derive(this.elements.slice(index, index + 1), this.description);
+  }
+
+  /** Playwright's `filter({ hasText })`, matched against the element's own text. */
+  filter(options: { hasText?: string | RegExp }): FakeLocator {
+    if (options.hasText === undefined) return this;
+    return this.derive(
+      this.elements.filter((element) => matchesValue(textOf(element), options.hasText!)),
+      `${this.description}.filter`,
+    );
   }
 
   async isVisible(): Promise<boolean> {
@@ -93,7 +123,8 @@ class FakeLocator {
   }
 
   async innerText(): Promise<string> {
-    return this.elements[0]?.text ?? this.elements[0]?.name ?? '';
+    const element = this.elements[0];
+    return element ? textOf(element) : '';
   }
 
   async getAttribute(attribute: string): Promise<string | null> {
@@ -102,6 +133,8 @@ class FakeLocator {
 
   async click(): Promise<void> {
     this.log.calls.push({ method: 'click', detail: this.description });
+    const opens = this.elements[0]?.opens;
+    if (opens) this.onNavigate(opens);
   }
 
   async fill(value: string): Promise<void> {
@@ -112,20 +145,57 @@ class FakeLocator {
     this.log.calls.push({ method: 'press', detail: key });
   }
 
+  /** Descendants: this locator's elements' children, plus the elements themselves. */
+  private descendants(): FakeElement[] {
+    const found: FakeElement[] = [];
+    const walk = (element: FakeElement) => {
+      for (const child of element.children ?? []) {
+        found.push(child);
+        walk(child);
+      }
+    };
+    this.elements.forEach(walk);
+    return found;
+  }
+
   locator(selector: string): FakeLocator {
-    return new FakeLocator(
-      this.elements.filter((element) => element.css?.includes(selector)),
-      this.log,
+    return this.derive(
+      this.descendants().filter((element) => element.css?.includes(selector) === true),
       selector,
+    );
+  }
+
+  getByText(value: string | RegExp, options?: { exact?: boolean }): FakeLocator {
+    return this.derive(
+      this.descendants().filter((element) =>
+        matchesValue(element.text ?? element.name, value, options?.exact),
+      ),
+      `text=${value}`,
+    );
+  }
+
+  getByRole(role: string, options?: { name?: string | RegExp; exact?: boolean }): FakeLocator {
+    return this.derive(
+      this.descendants().filter(
+        (element) =>
+          element.role === role &&
+          (options?.name === undefined || matchesValue(element.name, options.name, options.exact)),
+      ),
+      `role=${role}`,
     );
   }
 }
 
 class FakeRoot {
   constructor(
-    readonly spec: FakeRootSpec,
-    private readonly log: InteractionLog,
+    protected readonly read: () => FakeRootSpec,
+    protected readonly log: InteractionLog,
+    protected readonly onNavigate: (screen: string) => void = () => undefined,
   ) {}
+
+  get spec(): FakeRootSpec {
+    return this.read();
+  }
 
   url(): string {
     return this.spec.url;
@@ -148,7 +218,13 @@ class FakeRoot {
   }
 
   private make(predicate: (element: FakeElement) => boolean, description: string): FakeLocator {
-    return new FakeLocator(this.spec.elements.filter(predicate), this.log, description);
+    const found: FakeElement[] = [];
+    const walk = (element: FakeElement) => {
+      if (predicate(element)) found.push(element);
+      (element.children ?? []).forEach(walk);
+    };
+    this.spec.elements.forEach(walk);
+    return new FakeLocator(found, this.log, description, this.onNavigate);
   }
 
   getByTestId(value: string): FakeLocator {
@@ -184,31 +260,67 @@ class FakeRoot {
   }
 }
 
-export interface FakePage extends FakeRoot {
-  frames(): FakeRoot[];
-  mainFrame(): FakeRoot;
-  isClosed(): boolean;
+export interface FakeBrowserOptions {
+  /**
+   * Screens this fake browser knows, keyed by a name a route or a click can
+   * ask for. A `goto` whose URL contains the key switches to that screen.
+   */
+  screens?: Record<string, FakeRootSpec[]>;
+  /** Screen to start on, when `screens` is given. */
+  start?: string;
 }
 
 /**
  * Builds a page from a list of roots. The first entry is the main frame; the
  * rest are child frames.
  */
-export function buildFakePage(roots: FakeRootSpec[]): { page: any; log: InteractionLog } {
+export function buildFakePage(
+  roots: FakeRootSpec[],
+  options: FakeBrowserOptions = {},
+): { page: any; log: InteractionLog } {
   const log: InteractionLog = { calls: [] };
-  const [main, ...children] = roots;
+  const screens = options.screens ?? {};
 
-  const mainRoot = new FakeRoot(main, log);
-  const childRoots = children.map((spec) => new FakeRoot(spec, log));
+  let current: FakeRootSpec[] = options.start ? (screens[options.start] ?? roots) : roots;
+
+  const show = (screen: string): boolean => {
+    const found = screens[screen];
+    if (!found) return false;
+    current = found;
+    return true;
+  };
+
+  const onNavigate = (screen: string) => {
+    show(screen);
+  };
+
+  // One object per index, reused. `listSearchRoots` drops the main frame by
+  // identity — `frame === page.mainFrame()` — so a fresh object per call would
+  // let the main frame be searched twice.
+  const rootsByIndex = new Map<number, FakeRoot>();
+  const rootAt = (index: number): FakeRoot => {
+    let root = rootsByIndex.get(index);
+    if (!root) {
+      root = new FakeRoot(() => current[index], log, onNavigate);
+      rootsByIndex.set(index, root);
+    }
+    return root;
+  };
+
+  const mainRoot = rootAt(0);
 
   const page = Object.assign(mainRoot, {
-    frames: () => [mainRoot, ...childRoots],
-    mainFrame: () => mainRoot,
+    frames: () => current.map((_, index) => rootAt(index)),
+    mainFrame: () => rootAt(0),
     isClosed: () => false,
     context: () => ({}),
     waitForLoadState: async () => undefined,
     goto: async (url: string) => {
       log.calls.push({ method: 'goto', detail: url });
+      // A screen is matched by name appearing in the URL, so a test names its
+      // screens after the routes it expects ReadySupport to ask for.
+      const match = Object.keys(screens).find((key) => url.includes(key));
+      if (match) show(match);
     },
     reload: async () => {
       log.calls.push({ method: 'reload' });

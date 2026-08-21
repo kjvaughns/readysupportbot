@@ -9,8 +9,7 @@ import {
   appRootUrl,
   currentPanelHeading,
   isApprovedPanelLabel,
-  openFirstRecord,
-  openPanelByLabel,
+  openStep,
   returnToAppRoot,
 } from '../navigation';
 import { ReadymodeSession, ensureAuthenticated } from '../session';
@@ -161,10 +160,7 @@ export async function discoverInterface(
       const stepLabel = step.label ?? '(first record)';
       const expected = step.expectHeadings[0] ?? null;
 
-      const result: OpenPanelResult =
-        step.kind === 'record'
-          ? await openFirstRecord(page, step.expectHeadings)
-          : await openPanelByLabel(page, step.label ?? '', step.expectHeadings);
+      const result: OpenPanelResult = await openStep(page, step);
 
       const visit: PanelVisit = {
         route: route.id,
