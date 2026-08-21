@@ -1,59 +1,74 @@
-import type { Page } from 'playwright-core';
 import { logger } from '../../security/logger';
 import { sanitizePageValue } from '../../security/sanitize';
-import { listSearchRoots } from '../selectors/frames';
 import { LOGIN_SUCCESS_CONDITIONS } from '../selectors';
 import { anyPresent } from '../selectors/discovery';
+import {
+  OpenPanelResult,
+  PanelStep,
+  STARTER_ROUTES,
+  appRootUrl,
+  currentPanelHeading,
+  isApprovedPanelLabel,
+  openFirstRecord,
+  openPanelByLabel,
+  returnToAppRoot,
+} from '../navigation';
 import { ReadymodeSession, ensureAuthenticated } from '../session';
 import { EVIDENCE_CAPS, InterfaceEvidence, PageEvidence } from './evidence';
 import { buildEvidence, inspectCurrentPage } from './inspector';
 
 /**
- * The read-only walk through the real Readymode interface.
+ * The read-only walk through the real Readymode Starter interface.
  *
- * Discovery previously looked at exactly one page — whatever was on screen after
- * signing in — which is why controls that live on the users, campaigns and queue
- * screens were reported as missing, and why the login fields looked missing too:
- * by then they are gone from the DOM.
+ * Starter is a single-page application. After signing in the address stays at
+ * `https://<tenant>.readymode.com/#`, and every administrative screen — User
+ * Management, License Usage, Lead Management, Edit Queue, the Lead Playlist
+ * Editor — opens as a movable panel inside that page.
  *
- * This walks the interface instead, capturing evidence at each stop. It only
- * ever follows navigation. It never types, never submits, and never clicks
- * anything whose label suggests it changes data.
+ * Two consequences shape this file. There is nowhere to navigate to, so each
+ * stop is reached by clicking an exact, named label. And there is no URL change
+ * to wait for, so each stop is confirmed by the panel's own heading. Between
+ * routes the panel is closed rather than the page reloaded, because reloading a
+ * single-page application discards its state and pays for a full boot.
+ *
+ * The walk only ever opens screens. It never types, never submits, and never
+ * clicks anything whose label suggests it changes data.
  */
 
-/**
- * Labels that must never be clicked during discovery. This is the guard that
- * makes the walk safe: it is a denylist, so an unrecognized label is not clicked
- * unless it also matches the navigation allowlist below.
- */
-const UNSAFE_LABEL =
-  /\b(save|submit|apply|update|create|add|new|delete|remove|purge|erase|drop|deactivate|disable|suspend|reset|clear|release|force|sign\s?out|log\s?out|logout|terminate|cancel|charge|refund|void|pay|billing|import|upload|export|send|dial|call|start|stop|pause|resume|merge|assign|unassign|archive|restore|confirm|continue|ok\b|yes\b|no\b)/i;
-
-/** Labels that read as navigation into a section. */
-const NAVIGATION_LABEL =
-  /\b(users?|agents?|licen[cs]e|leads?|campaigns?|queues?|playlists?|states?|settings?|admin|dashboard|reports?|voip|phones?|dispositions?|folders?|groups?|permissions?|applications?|options?|management|manager|profile|configuration|home|iq)\b/i;
-
-export function isSafeToClick(label: string): boolean {
-  const value = sanitizePageValue(label, 80).trim();
-  if (!value) return false;
-  if (value.length > 60) return false;
-  if (UNSAFE_LABEL.test(value)) return false;
-  return NAVIGATION_LABEL.test(value);
-}
+// The looser guard lives with the navigation model, next to the exact
+// allowlist it complements. Re-exported because it is the walk's safety rule.
+export { isSafeToClick } from '../navigation';
 
 export interface WalkOptions {
-  /** Maximum navigation stops, excluding the login and dashboard captures. */
+  /** Maximum evidence captures, excluding the login and dashboard captures. */
   maxStops?: number;
   /** Whether to capture screenshots at each stop. */
   screenshots?: boolean;
 }
 
+/** One attempt to open one panel, and what actually happened. */
+export interface PanelVisit {
+  route: string;
+  kind: PanelStep['kind'];
+  /** The label clicked, or `(first record)` for a row that has no fixed label. */
+  step: string;
+  /** The heading the step expected. */
+  expectedHeading: string | null;
+  /** The heading that actually appeared. */
+  observedHeading: string | null;
+  opened: boolean;
+  captured: boolean;
+  reason?: string;
+}
+
 export interface WalkResult {
   evidence: InterfaceEvidence;
-  /** Navigation labels that were visited, in order. */
+  /** Stops that produced evidence, in order. */
   visited: string[];
-  /** Navigation labels that were skipped, with the reason. */
+  /** Routes and labels that were not followed, with the reason. */
   skipped: Array<{ label: string; reason: string }>;
+  /** Every panel attempt: expected heading against observed heading. */
+  panels: PanelVisit[];
   /**
    * False when the login URL went straight to the dashboard because the
    * persistent Browserbase session was still signed in. The login controls are
@@ -62,36 +77,29 @@ export interface WalkResult {
   loginPageObserved: boolean;
 }
 
-interface NavigationCandidate {
-  label: string;
-  rootIndex: number;
-}
-
-/** Collects clickable navigation labels from the captured evidence. */
-function navigationCandidates(page: PageEvidence): NavigationCandidate[] {
+/** Navigation labels visible on the dashboard, for the skipped report. */
+function observedNavigationLabels(page: PageEvidence): string[] {
   const seen = new Set<string>();
-  const candidates: NavigationCandidate[] = [];
 
-  page.roots.forEach((root, rootIndex) => {
+  for (const root of page.roots) {
     const labels = [
       ...root.nav.map((entry) => entry.label),
       ...root.links.filter((link) => link.visible).map((link) => link.label),
+      ...root.clickables.filter((entry) => entry.visible).map((entry) => entry.label),
     ];
 
     for (const label of labels) {
       const clean = sanitizePageValue(label, 80).trim();
-      if (!clean || seen.has(clean.toLowerCase())) continue;
-      seen.add(clean.toLowerCase());
-      candidates.push({ label: clean, rootIndex });
+      if (clean) seen.add(clean);
     }
-  });
+  }
 
-  return candidates;
+  return [...seen];
 }
 
 /**
- * Signs in, then walks. The login page is captured *before* authenticating,
- * which is the only moment the login controls exist.
+ * Signs in, then walks the panels. The login page is captured *before*
+ * authenticating, which is the only moment the login controls exist.
  */
 export async function discoverInterface(
   session: ReadymodeSession,
@@ -105,6 +113,7 @@ export async function discoverInterface(
   const pages: PageEvidence[] = [];
   const visited: string[] = [];
   const skipped: Array<{ label: string; reason: string }> = [];
+  const panels: PanelVisit[] = [];
 
   const { page } = session;
 
@@ -121,78 +130,96 @@ export async function discoverInterface(
   );
 
   if (!loginPageObserved) {
-    logger.info(
-      'The Browserbase session was already signed in, so the login page was not shown.',
-    );
+    logger.info('The Browserbase session was already signed in, so the login page was not shown.');
   }
 
   // 2. Sign in. This also handles the administrator session notice.
   await ensureAuthenticated(session);
   const dashboard = await inspectCurrentPage(page, 'dashboard', counters, { screenshot: screenshots });
   pages.push(dashboard);
-  const dashboardUrl = page.url();
 
-  // 3. Follow navigation, one stop at a time, returning to the dashboard between.
-  const candidates = navigationCandidates(dashboard);
+  // Everything from here happens at this one address.
+  const appRoot = appRootUrl(page.url());
 
-  for (const candidate of candidates) {
-    if (visited.length >= maxStops) {
-      skipped.push({ label: candidate.label, reason: 'Stop limit reached.' });
+  for (const label of observedNavigationLabels(dashboard).slice(0, 40)) {
+    if (!isApprovedPanelLabel(label)) {
+      skipped.push({ label, reason: 'Not one of the approved navigation labels.' });
+    }
+  }
+
+  // 3. Walk the panels. Each route starts from the application root and is
+  //    confirmed at every step by the heading the interface shows.
+  let captured = 0;
+
+  for (const route of STARTER_ROUTES) {
+    if (captured >= maxStops) {
+      skipped.push({ label: route.id, reason: 'Stop limit reached.' });
       continue;
     }
-    if (!isSafeToClick(candidate.label)) {
-      skipped.push({ label: candidate.label, reason: 'Not a recognized navigation label.' });
-      continue;
+
+    for (const step of route.steps) {
+      const stepLabel = step.label ?? '(first record)';
+      const expected = step.expectHeadings[0] ?? null;
+
+      const result: OpenPanelResult =
+        step.kind === 'record'
+          ? await openFirstRecord(page, step.expectHeadings)
+          : await openPanelByLabel(page, step.label ?? '', step.expectHeadings);
+
+      const visit: PanelVisit = {
+        route: route.id,
+        kind: step.kind,
+        step: stepLabel,
+        expectedHeading: expected,
+        observedHeading: result.heading,
+        opened: result.opened,
+        captured: false,
+        reason: result.reason,
+      };
+
+      if (!result.opened) {
+        panels.push(visit);
+        if (step.optional) continue;
+        skipped.push({
+          label: `${route.id}/${stepLabel}`,
+          reason: result.reason ?? 'The step did not open.',
+        });
+        break;
+      }
+
+      if (step.capture !== false && captured < maxStops) {
+        pages.push(
+          await inspectCurrentPage(page, `panel:${route.id}/${stepLabel}`, counters, {
+            screenshot: screenshots,
+            expectedPanelState: expected,
+          }),
+        );
+        captured += 1;
+        visited.push(`${route.id}/${stepLabel}`);
+        visit.captured = true;
+      }
+
+      panels.push(visit);
     }
 
-    const moved = await clickNavigation(page, candidate.label);
-    if (!moved) {
-      skipped.push({ label: candidate.label, reason: 'The navigation item could not be resolved uniquely.' });
-      continue;
+    // Close the panel rather than reloading. A reload works, but it throws away
+    // the single-page application's state and costs a full boot each time.
+    const returned = await returnToAppRoot(page, appRoot);
+    if (returned === 'failed') {
+      logger.warn({ route: route.id }, 'Could not return to the application root after a route');
     }
+  }
 
-    pages.push(
-      await inspectCurrentPage(page, `nav:${candidate.label}`, counters, { screenshot: screenshots }),
-    );
-    visited.push(candidate.label);
-
-    // Return to a known location so the next stop starts from the same place.
-    await page.goto(dashboardUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
+  const endedOn = await currentPanelHeading(page, 300);
+  if (endedOn) {
+    logger.debug({ panel: endedOn }, 'A panel was still open when the walk finished');
   }
 
   return {
     evidence: buildEvidence(loginUrl, pages, counters),
     visited,
     skipped,
+    panels,
     loginPageObserved,
   };
-}
-
-/**
- * Clicks one navigation label, but only when it resolves to exactly one visible
- * element across the page and its frames.
- */
-async function clickNavigation(page: Page, label: string): Promise<boolean> {
-  for (const root of listSearchRoots(page)) {
-    let locator;
-    try {
-      locator = root.getByText(label, { exact: true });
-    } catch {
-      continue;
-    }
-
-    const count = await locator.count().catch(() => 0);
-    if (count !== 1) continue;
-    if (!(await locator.isVisible().catch(() => false))) continue;
-
-    try {
-      await locator.click({ timeout: 8000 });
-      await page.waitForLoadState('domcontentloaded').catch(() => undefined);
-      return true;
-    } catch (error) {
-      logger.debug({ label, err: error }, 'Navigation click failed during discovery');
-      return false;
-    }
-  }
-  return false;
 }

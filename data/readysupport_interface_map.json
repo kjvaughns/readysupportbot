@@ -1,0 +1,598 @@
+{
+  "schema_version": "1.0",
+  "captured_at": "2026-08-21T00:00:00Z",
+  "gateway": "{baseUrl}",
+  "mode": "read_only_metadata_only",
+  "privacy": {
+    "excluded": [
+      "passwords",
+      "cookies",
+      "tokens",
+      "customer records",
+      "lead records",
+      "phone numbers",
+      "personal data",
+      "input values"
+    ],
+    "notes": "Selectors and labels are stored without user or lead row contents. Any route containing a profile identifier was excluded from automation evidence."
+  },
+  "selector_policy": {
+    "approval_required": true,
+    "allowed_statuses": [
+      "documented",
+      "discovered",
+      "implemented",
+      "dry_run_tested",
+      "live_tested",
+      "blocked",
+      "unsupported"
+    ],
+    "rule": "Only discovered selectors with an observed postcondition may be proposed. Administrative actions remain disabled until Owner approval."
+  },
+  "shell": {
+    "url": "{baseUrl}/-Dashboard",
+    "title": "{tenant} CRM",
+    "controls": [
+      {
+        "key": "shell.search",
+        "selector": "#hotbar_search",
+        "type": "input",
+        "label": "Search..",
+        "status": "discovered"
+      },
+      {
+        "key": "shell.session_state",
+        "selector": "#CCS_Session_Statebox",
+        "type": "select",
+        "status": "discovered",
+        "options_observed": [
+          "Prep work",
+          "Ready",
+          "Break",
+          "Meeting",
+          "Last call",
+          "Inbound only"
+        ]
+      },
+      {
+        "key": "shell.sign_out",
+        "selector": "#hotbar_logout",
+        "type": "link",
+        "status": "discovered",
+        "danger": "session_termination"
+      }
+    ],
+    "frames": [
+      {
+        "key": "frame.resource_center",
+        "selector": "iframe#userpilot-resource-centre-frame",
+        "title": "Resource Center",
+        "status": "discovered"
+      },
+      {
+        "key": "frame.support_context",
+        "selector": "iframe#embeddedMessagingSiteContextFrame",
+        "name": "embeddedMessagingSiteContextFrame",
+        "origin": "https://xencall.my.site.com",
+        "status": "discovered",
+        "automation_use": "none"
+      }
+    ],
+    "navigation": [
+      {
+        "label": "Dashboard",
+        "path": "-Dashboard",
+        "absolute_url": "{baseUrl}/-Dashboard",
+        "status": "discovered"
+      },
+      {
+        "label": "User Management",
+        "path": "-Team/ManageUsers",
+        "absolute_url": "{baseUrl}/-Team/ManageUsers",
+        "status": "discovered"
+      },
+      {
+        "label": "Lead Management",
+        "path": "-AI Leads/pools",
+        "absolute_url": "{baseUrl}/-AI%20Leads/pools",
+        "status": "discovered"
+      },
+      {
+        "label": "License Usage",
+        "path": "+Team/ManageLicenses",
+        "absolute_url": "{baseUrl}/+Team/ManageLicenses",
+        "status": "discovered"
+      },
+      {
+        "label": "Settings",
+        "path": "-Configure",
+        "absolute_url": "{baseUrl}/-Configure",
+        "status": "discovered"
+      },
+      {
+        "label": "My Files",
+        "path": "-Folders",
+        "status": "discovered"
+      },
+      {
+        "label": "Shared Files",
+        "path": "-Folders/shared",
+        "status": "discovered"
+      },
+      {
+        "label": "My Appointments",
+        "path": "+CCS Appointments/View",
+        "status": "discovered"
+      },
+      {
+        "label": "Audit logs",
+        "path": "+Team/AuditLog/Reports/out.php",
+        "status": "discovered"
+      },
+      {
+        "label": "Call logs",
+        "path": "+CCS Reports/call_log",
+        "status": "discovered"
+      },
+      {
+        "label": "Productivity",
+        "path": "+CCS Reports/productivity",
+        "status": "discovered"
+      },
+      {
+        "label": "Dialer report",
+        "path": "+CCS Reports/dialer",
+        "status": "discovered"
+      },
+      {
+        "label": "Lead reports",
+        "path": "+CCS Reports/View/Report type=Lead^batch reports",
+        "status": "discovered"
+      },
+      {
+        "label": "Agent Report",
+        "path": "+CCS Reports/agent",
+        "status": "discovered"
+      },
+      {
+        "label": "Research Calls",
+        "path": "+CCS Reports/research",
+        "status": "discovered"
+      },
+      {
+        "label": "Live call report",
+        "path": "+CCS Reports/live",
+        "status": "discovered"
+      },
+      {
+        "label": "Recent calls",
+        "path": "-CCS Reports/inboundcl",
+        "status": "discovered"
+      },
+      {
+        "label": "Office Map",
+        "path": "+CCS Floor Monitor/Floor Map=1",
+        "status": "discovered"
+      }
+    ]
+  },
+  "login": {
+    "url": "{baseUrl}/login_new/?then=/",
+    "controls": [
+      {
+        "key": "login.username",
+        "selector": "input[placeholder='Username']",
+        "type": "textbox",
+        "status": "discovered",
+        "handling": "human_only; never read or store value"
+      },
+      {
+        "key": "login.password",
+        "selector": "input[placeholder='Password']",
+        "type": "password",
+        "status": "discovered",
+        "handling": "human_only; never read or store value"
+      },
+      {
+        "key": "login.submit",
+        "selector": "button",
+        "accessible_name": "Sign in",
+        "status": "discovered",
+        "handling": "human_only login submission"
+      },
+      {
+        "key": "login.admin_mode",
+        "selector": "input[type='checkbox']",
+        "near_text": "Sign in as Admin",
+        "status": "discovered"
+      },
+      {
+        "key": "login.phone_mode",
+        "selector": "select",
+        "status": "discovered",
+        "options_observed": [
+          "Web Phone (Automatic)",
+          "Web Phone (Default)",
+          "External VOIP Phone",
+          "Web Phone (Java)",
+          "No Phone"
+        ]
+      },
+      {
+        "key": "login.multiple_session_continue",
+        "selector": "button",
+        "accessible_name": "Continue",
+        "status": "documented",
+        "authorization": "User explicitly authorized pressing Continue when Readymode warns about an existing session",
+        "postcondition": "dashboard or license usage page becomes available"
+      }
+    ]
+  },
+  "pages": [
+    {
+      "key": "user_management",
+      "url": "{baseUrl}/-Team/ManageUsers",
+      "heading": "User Management",
+      "controls": [
+        {
+          "key": "users.search_toggle",
+          "selector": "#uMgmtSearchBut",
+          "title": "Search",
+          "status": "discovered"
+        },
+        {
+          "key": "users.search",
+          "selector": "#userMgmtSearchUser",
+          "type": "search",
+          "placeholder": "Search Users",
+          "status": "discovered",
+          "handling": "never store results"
+        },
+        {
+          "key": "users.open_queues",
+          "selector": "#uMgmtQueuelistBut",
+          "title": "Open queue",
+          "status": "discovered"
+        },
+        {
+          "key": "users.view_by_role",
+          "selector": "#uMgmtViewOUBut",
+          "title": "View by role",
+          "status": "discovered"
+        },
+        {
+          "key": "users.view_by_folder",
+          "selector": "#uMgmtViewFolderBut",
+          "title": "View by folder",
+          "status": "discovered"
+        },
+        {
+          "key": "users.toggle_deleted",
+          "selector": "#uMgmtViewDeletedBut",
+          "title": "Show/hide deleted users",
+          "status": "discovered",
+          "danger": "may expose deleted-user metadata; do not capture row contents"
+        },
+        {
+          "key": "users.bulk_passwords",
+          "route": "+Team/ManageUsers/bulkPassword",
+          "title": "Open Bulk Passwords Page",
+          "status": "discovered",
+          "handling": "password operations unsupported for autonomous execution"
+        }
+      ],
+      "workflow_notes": [
+        "User Creation Tool is reached from the plus icon next to a user folder.",
+        "Expected creation fields are Name, Login ID, Extension, Folder, Bulk Password or password, optional Manually Select Role, Add More Rows, remove row, and Save.",
+        "Creation was documented from the official Help Center but not live tested because it would create an account."
+      ]
+    },
+    {
+      "key": "license_usage",
+      "url": "{baseUrl}/+Team/ManageLicenses",
+      "heading": "License Usage",
+      "tables": [
+        {
+          "name": "license_summary",
+          "headers": [
+            "Agent Licenses",
+            "Admin Licenses",
+            "Total",
+            "Assigned",
+            "Remaining"
+          ]
+        },
+        {
+          "name": "users",
+          "headers": [
+            "User Id",
+            "User Account",
+            "User Name",
+            "License Type",
+            "Signed In",
+            "Last Active"
+          ]
+        }
+      ],
+      "controls": [
+        {
+          "key": "licenses.sign_out_user",
+          "selector": "a#sign-out-btn.button.primary",
+          "status": "discovered",
+          "multiplicity": "one per user row",
+          "danger": "forces session termination",
+          "required_postcondition": "target row becomes signed out and remaining license count increases"
+        },
+        {
+          "key": "licenses.sign_out_inactive",
+          "accessible_name": "Sign Out Inactive Users",
+          "status": "documented",
+          "danger": "forces multiple session terminations"
+        },
+        {
+          "key": "licenses.sign_out_all",
+          "accessible_name": "Sign Out All Users",
+          "status": "documented",
+          "danger": "forces multiple session terminations"
+        }
+      ]
+    },
+    {
+      "key": "lead_management",
+      "url": "{baseUrl}/-AI%20Leads/pools",
+      "heading": "Lead Management",
+      "tabs": [
+        {
+          "label": "Queues",
+          "selector": "#ui-id-1",
+          "panel_role": "tabpanel",
+          "status": "discovered"
+        },
+        {
+          "label": "Campaigns",
+          "selector": "#ui-id-2",
+          "panel_role": "tabpanel",
+          "status": "discovered"
+        }
+      ],
+      "controls": [
+        {
+          "key": "leads.upload_file",
+          "selector": "#leadfileuploadbutton",
+          "type": "file",
+          "frame_target": "iframe[name='lead_csv_postwindow']",
+          "status": "discovered",
+          "danger": "uploads lead data; unsupported in read-only mode"
+        }
+      ]
+    },
+    {
+      "key": "queue_editor",
+      "route_pattern": "+Communication/Queue={queue_id}",
+      "observed_example": "{baseUrl}/+Communication/Queue=0",
+      "heading_pattern": "Edit Queue: {queue_name}",
+      "tabs": [
+        {
+          "label": "Members",
+          "selector": "#ui-id-1 or #ui-id-2 depending queue type",
+          "status": "discovered",
+          "warning": "dynamic IDs vary by rendered tab set"
+        },
+        {
+          "label": "View leads",
+          "selector": "#ui-id-3",
+          "status": "discovered",
+          "handling": "do not inspect or capture lead rows"
+        },
+        {
+          "label": "Configuration",
+          "selector": "#ui-id-4",
+          "status": "discovered"
+        }
+      ],
+      "configuration_fields": [
+        {
+          "name_pattern": "Queue,{queue_id}@queue",
+          "label": "Queue Name"
+        },
+        {
+          "id": "queue-queue_type",
+          "name_pattern": "Queue,{queue_id}@queue_type",
+          "label": "Queue Type"
+        },
+        {
+          "name_pattern": "Queue,{queue_id}@weight",
+          "label": "Queue Priority"
+        },
+        {
+          "id": "queue-queue_strat",
+          "name_pattern": "Queue,{queue_id}@strategy",
+          "label": "Queue Strategy"
+        },
+        {
+          "name_pattern": "Queue,{queue_id}@intercept",
+          "label": "Intercept Mode"
+        },
+        {
+          "name_pattern": "Queue,{queue_id}@timeout_peragent",
+          "label": "Per Agent Ring Duration"
+        },
+        {
+          "id": "dialersettingdropdown",
+          "name_pattern": "Queue,{queue_id}@Dialer_configId",
+          "label": "Queue Speed / Dialer Configuration"
+        },
+        {
+          "id": "mdselect",
+          "name_pattern": "Queue,{queue_id}@amd",
+          "label": "Machine Detection"
+        },
+        {
+          "id": "agent_announce_toggle",
+          "name_pattern": "Queue,{queue_id}@whisper_enable",
+          "label": "Agent Announcement"
+        },
+        {
+          "id": "todEnable",
+          "name_pattern": "Queue,{queue_id}@custom_calltimes",
+          "label": "Custom Call Times"
+        },
+        {
+          "id": "todStart",
+          "name_pattern": "Queue,{queue_id}@starttime",
+          "label": "Start Time"
+        },
+        {
+          "id": "todEnd",
+          "name_pattern": "Queue,{queue_id}@endtime",
+          "label": "End Time"
+        },
+        {
+          "id": "queue_configure_ringtoneSelect",
+          "name_pattern": "Queue,{queue_id}@ringtoneAssetU",
+          "label": "Ringtone"
+        }
+      ],
+      "frames": [
+        {
+          "name": "queuevmup_target",
+          "purpose": "voicemail upload response",
+          "status": "discovered"
+        },
+        {
+          "name": "whisperup_target",
+          "purpose": "whisper upload response",
+          "status": "discovered"
+        }
+      ]
+    },
+    {
+      "key": "settings",
+      "url": "{baseUrl}/-Configure",
+      "heading": "Settings",
+      "sections": [
+        {
+          "label": "My Account",
+          "path": "*Configure/Team/My Account",
+          "status": "discovered",
+          "handling": "account and credential content excluded"
+        },
+        {
+          "label": "VOIP",
+          "path": "!Configure/Communication/VOIP",
+          "status": "discovered"
+        },
+        {
+          "label": "Lead distribution",
+          "path": "!Configure/AI Leads/Lead distribution",
+          "status": "discovered"
+        },
+        {
+          "label": "Agent Options",
+          "path": "!Configure/CCS Profile/Agent Options",
+          "status": "discovered"
+        },
+        {
+          "label": "TPV",
+          "path": "!Configure/TPV/TPV",
+          "status": "discovered"
+        }
+      ]
+    }
+  ],
+  "ready_support_workflows": [
+    {
+      "key": "continue_existing_session",
+      "status": "documented",
+      "path": [
+        "Open gateway login",
+        "Human signs in",
+        "If multiple login warning appears, press Continue",
+        "Verify Dashboard or License Usage"
+      ]
+    },
+    {
+      "key": "create_user",
+      "status": "documented",
+      "path": [
+        "Dashboard",
+        "Manage Users",
+        "Choose folder",
+        "Plus icon",
+        "User Creation Tool",
+        "Enter approved fields",
+        "Optional role",
+        "Save"
+      ],
+      "execution": "requires explicit action authorization and human handling of password"
+    },
+    {
+      "key": "clear_user_license",
+      "status": "discovered",
+      "path": [
+        "Dashboard",
+        "Manage",
+        "License Usage",
+        "Locate target row without storing row data",
+        "Sign out",
+        "Verify license count"
+      ],
+      "execution": "requires action-time confirmation because it terminates a session"
+    },
+    {
+      "key": "configure_queue",
+      "status": "discovered",
+      "path": [
+        "Dashboard",
+        "Manage Leads",
+        "Queues",
+        "Open queue",
+        "Configuration",
+        "Update approved fields",
+        "Verify postcondition"
+      ],
+      "execution": "disabled in read-only discovery"
+    },
+    {
+      "key": "restrict_dialing_by_state",
+      "status": "documented",
+      "interface": "Readymode iQ",
+      "path": [
+        "Advanced",
+        "Settings",
+        "State Calling Restrictions (TCPA)",
+        "Enable toggle",
+        "Save"
+      ],
+      "warning": "This enforces legal calling windows, not agent-specific lead-state assignment."
+    },
+    {
+      "key": "assign_state_filtered_leads",
+      "status": "documented",
+      "path": [
+        "General Leads Queue",
+        "Playlist",
+        "Filters",
+        "Location or State criteria",
+        "Assign playlist members",
+        "Save"
+      ],
+      "warning": "Exact Starter selector is unresolved. Do not substitute the TCPA state restriction control for lead assignment."
+    }
+  ],
+  "blocked_or_unverified": [
+    {
+      "area": "User list and profile editor",
+      "reason": "Legacy controls rendered at zero size in the cloud session and rows contain personal data. Official workflow is documented, but live form selectors remain unresolved."
+    },
+    {
+      "area": "Playlist editor",
+      "reason": "Live selector inspection was not completed without opening lead-related content. Official navigation and concepts are documented."
+    },
+    {
+      "area": "Readymode iQ administrator UI",
+      "reason": "The signed-in gateway exposed Starter legacy UI. iQ paths are Help Center documented only."
+    }
+  ],
+  "title_note": "Window titles and account names were removed: this file is committed to a public repository. Routes are stored relative to the organization's configured base URL."
+}

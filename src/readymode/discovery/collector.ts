@@ -75,6 +75,45 @@ export function collectFromRoot({ caps, stableAttributes }: CollectorOptions): C
         '',
     );
 
+  /**
+   * The file name of an element's icon. Legacy toolbars label their controls
+   * with an image and nothing else, so the image name is frequently the only
+   * developer-supplied identifier available. The path and query string are
+   * dropped — only the file name is kept.
+   */
+  const iconName = (element: Element): string => {
+    const image =
+      element.tagName.toLowerCase() === 'img' ? (element as HTMLImageElement) : element.querySelector('img');
+    if (!image) return '';
+    const source = image.getAttribute('src') ?? '';
+    const file = source.split('?')[0].split('/').pop() ?? '';
+    return file.slice(0, 60);
+  };
+
+  /**
+   * The nearest preceding heading, used to tell two identically labelled
+   * controls apart — a "Save" inside the Lead Playlist Editor is not the same
+   * control as a "Save" inside Edit Queue.
+   */
+  const nearestContext = (element: Element): string => {
+    let current: Element | null = element;
+    let depth = 0;
+    while (current && depth < 8) {
+      let sibling: Element | null = current.previousElementSibling;
+      while (sibling) {
+        const tag = sibling.tagName.toLowerCase();
+        if (/^h[1-6]$/.test(tag) || sibling.getAttribute('role') === 'heading') {
+          return text(sibling.textContent).slice(0, caps.maxNearbyTextLength);
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      current = current.parentElement;
+      depth += 1;
+    }
+    const caption = element.closest('table')?.querySelector('caption');
+    return caption ? text(caption.textContent).slice(0, caps.maxNearbyTextLength) : '';
+  };
+
   const base = (element: Element, ordinal: number) => ({
     ordinal,
     tag: element.tagName.toLowerCase(),
@@ -190,14 +229,52 @@ export function collectFromRoot({ caps, stableAttributes }: CollectorOptions): C
   // -- tables ----------------------------------------------------------------
   const tableNodes = Array.from(document.querySelectorAll('table'));
   note('tables', tableNodes.length, caps.maxTables);
-  const tables = cap(tableNodes, caps.maxTables).map((element, index) => ({
-    ...base(element as Element, index + 1),
-    // Headings only. Table bodies hold lead data and are never read.
-    headings: Array.from(element.querySelectorAll('th, [role="columnheader"]'))
-      .slice(0, caps.maxHeadingsPerTable)
-      .map((heading) => text(heading.textContent)),
-    rowCount: element.querySelectorAll('tr').length,
-  }));
+  const tables = cap(tableNodes, caps.maxTables).map((element, index) => {
+    // Labels of controls repeated down the rows, for example "Sign Out". This
+    // is what lets a row-scoped action be recognized without proposing a
+    // selector that would match every row.
+    //
+    // A label is only kept when it appears in more than one row, so a link
+    // whose text is a person's name — different in every row — is structurally
+    // excluded. Single-row tables are the one exception, and there is nothing
+    // to compare against there.
+    const bodyRows = Array.from(element.querySelectorAll('tr')).filter(
+      (row) => row.querySelector('td') !== null,
+    );
+    const rowCounts = new Map<string, number>();
+    for (const row of bodyRows.slice(0, 200)) {
+      const seenInRow = new Set<string>();
+      for (const control of Array.from(
+        row.querySelectorAll(
+          'td button, td a, td input[type="button"], td input[type="submit"], td [role="button"], td [onclick]',
+        ),
+      )) {
+        const label = (accessibleName(control) || text(control.getAttribute('value')) || iconName(control)).slice(
+          0,
+          caps.maxTextLength,
+        );
+        if (!label || seenInRow.has(label)) continue;
+        seenInRow.add(label);
+        rowCounts.set(label, (rowCounts.get(label) ?? 0) + 1);
+      }
+    }
+    const rowControls: string[] = [];
+    for (const [label, count] of rowCounts) {
+      if (count < 2 && bodyRows.length > 1) continue;
+      rowControls.push(label);
+      if (rowControls.length >= caps.maxRowControls) break;
+    }
+
+    return {
+      ...base(element as Element, index + 1),
+      // Headings only. Table bodies hold lead data and are never read.
+      headings: Array.from(element.querySelectorAll('th, [role="columnheader"]'))
+        .slice(0, caps.maxHeadingsPerTable)
+        .map((heading) => text(heading.textContent)),
+      rowCount: element.querySelectorAll('tr').length,
+      rowControls,
+    };
+  });
 
   // -- navigation ------------------------------------------------------------
   const navNodes = Array.from(
@@ -210,6 +287,77 @@ export function collectFromRoot({ caps, stableAttributes }: CollectorOptions): C
     role: (element as Element).getAttribute('role') ?? undefined,
     depth: 0,
   }));
+
+  // -- legacy clickables -----------------------------------------------------
+  // Readymode Starter's toolbars are images and spans wired up with onclick, so
+  // a collector that only looks at <button> sees an empty screen.
+  //
+  // Identity only. Colour, size and screen position are deliberately not
+  // collected: a selector must never be inferred from an icon's appearance.
+  const clickableNodes = Array.from(
+    document.querySelectorAll(
+      [
+        '[onclick]',
+        'a',
+        'button',
+        'input[type="button"]',
+        'input[type="submit"]',
+        '[role="button"]',
+        '[role="menuitem"]',
+        '[role="tab"]',
+        '[role="combobox"]',
+        '[aria-haspopup]',
+        '.btn',
+        '.button',
+        '.clickable',
+        '.tab',
+      ].join(', '),
+    ),
+  ).filter((element) => isVisible(element));
+  note('clickables', clickableNodes.length, caps.maxClickables);
+  const clickables = cap(clickableNodes, caps.maxClickables).map((element, index) => {
+    const record: CollectorOutput['clickables'][number] = {
+      ...base(element, index + 1),
+      label: (accessibleName(element) || text(element.getAttribute('value'))).slice(0, caps.maxTextLength),
+      hasOnClick: element.hasAttribute('onclick') || typeof (element as HTMLElement).onclick === 'function',
+    };
+
+    const title = text(element.getAttribute('title'));
+    const alt = text(element.getAttribute('alt'));
+    const ariaLabel = text(element.getAttribute('aria-label'));
+    const classes = text(element.getAttribute('class'));
+    const imageSource = iconName(element);
+    const context = nearestContext(element);
+
+    if (title) record.title = title.slice(0, caps.maxTextLength);
+    if (alt) record.alt = alt.slice(0, caps.maxTextLength);
+    if (ariaLabel) record.ariaLabel = ariaLabel.slice(0, caps.maxTextLength);
+    if (classes) record.classes = classes.slice(0, caps.maxTextLength);
+    if (imageSource) record.imageSource = imageSource;
+    if (context) record.context = context;
+
+    return record;
+  });
+
+  // -- headings --------------------------------------------------------------
+  // Visible headings are how a panel states which screen it is: "User
+  // Management", "License Usage", "Lead Playlist Editor". The URL never says.
+  const headingNodes = Array.from(
+    document.querySelectorAll(
+      'h1, h2, h3, h4, h5, h6, [role="heading"], legend, caption, .panel-title, .panelTitle, .ui-dialog-title',
+    ),
+  ).filter((element) => isVisible(element));
+  note('headings', headingNodes.length, caps.maxHeadings);
+  const headings = cap(headingNodes, caps.maxHeadings)
+    .map((element) => {
+      const fromTag = /^h([1-6])$/.exec(element.tagName.toLowerCase());
+      const ariaLevel = Number(element.getAttribute('aria-level'));
+      return {
+        level: fromTag ? Number(fromTag[1]) : Number.isFinite(ariaLevel) && ariaLevel > 0 ? ariaLevel : 2,
+        text: text(element.textContent).slice(0, caps.maxTextLength),
+      };
+    })
+    .filter((heading) => heading.text.length > 0);
 
   return {
     title: document.title ?? '',
@@ -224,6 +372,8 @@ export function collectFromRoot({ caps, stableAttributes }: CollectorOptions): C
     links,
     forms,
     tables,
+    clickables,
+    headings,
     truncated,
     passwordFieldsSeen,
   };

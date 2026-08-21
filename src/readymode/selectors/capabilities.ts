@@ -7,11 +7,26 @@ import { ActionType } from '../../types';
  *
  * `allowBuiltin` is the safety line. Read-only capabilities may run on the
  * built-in candidate selectors, because the worst case is failing to find
- * something. Anything that writes to Readymode may not: it requires selectors
- * that came from the real interface, so a guess can never click Save.
+ * something.
+ *
+ * Anything that writes to Readymode may not. It requires a selector an Owner
+ * approved for this organization — not a guess, and not evidence alone. A
+ * selector transcribed from an inspection or generated into the repository is
+ * good evidence about the interface, but it is not somebody with authority
+ * saying "yes, act on this account with this". Those are different claims, and
+ * the second is the one that authorizes a change.
  */
 
-export type ControlSource = 'approved_profile' | 'observed_file' | 'builtin' | 'none';
+export type ControlSource =
+  /** An Owner approved this, for this organization, from a real discovery run. */
+  | 'approved_profile'
+  /** Generated from a real discovery report and committed to the repository. */
+  | 'observed_file'
+  /** Transcribed from the read-only inspection recorded in `data/`. */
+  | 'interface_map'
+  /** A built-in guess. Useful for finding things; never for changing them. */
+  | 'builtin'
+  | 'none';
 export type ControlState = 'verified' | 'unverified' | 'ambiguous' | 'missing';
 
 export interface ControlStatus {
@@ -170,8 +185,11 @@ export interface CapabilityStatus {
 
 function isUsable(status: ControlStatus | undefined, allowBuiltin: boolean): boolean {
   if (!status || status.state !== 'verified') return false;
-  if (status.source === 'builtin' && !allowBuiltin) return false;
-  return status.source !== 'none';
+  if (status.source === 'none') return false;
+  // Reading: any source that actually found the control will do.
+  if (allowBuiltin) return true;
+  // Changing: only an Owner-approved profile authorizes it.
+  return status.source === 'approved_profile';
 }
 
 /** Rolls per-control results up into the capability report. */
@@ -202,6 +220,16 @@ export function capabilityStatuses(controls: ControlStatus[]): CapabilityStatus[
       !capability.allowBuiltin &&
       capability.requiredControls.some((name) => byName.get(name)?.source === 'builtin');
 
+    // Found from real evidence, but nobody has approved acting on it yet. That
+    // is a different problem from "we cannot find it", and it has a different
+    // fix: an Owner approves the profile.
+    const awaitingApproval =
+      !capability.allowBuiltin &&
+      !builtinBlocked &&
+      capability.requiredControls.some((name) =>
+        ['observed_file', 'interface_map'].includes(byName.get(name)?.source ?? ''),
+      );
+
     return {
       capability: capability.id,
       label: capability.label,
@@ -212,7 +240,9 @@ export function capabilityStatuses(controls: ControlStatus[]): CapabilityStatus[
         ? undefined
         : builtinBlocked
           ? 'These controls have only been matched by ReadySupport’s built-in guesses, which are not used for changes. Run interface discovery so they come from the real interface.'
-          : 'These controls have not been identified in the real Readymode interface yet.',
+          : awaitingApproval
+            ? 'These controls were found in the real interface, but no Owner has approved the selector profile for this organization yet. Approve it and this becomes available.'
+            : 'These controls have not been identified in the real Readymode interface yet.',
     };
   });
 }

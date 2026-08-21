@@ -19,6 +19,9 @@ export const EVIDENCE_CAPS = {
   maxHeadingsPerTable: 30,
   maxNavItems: 80,
   maxForms: 30,
+  maxClickables: 200,
+  maxHeadings: 40,
+  maxRowControls: 20,
   maxTextLength: 120,
   maxUrlLength: 300,
   maxNearbyTextLength: 60,
@@ -91,6 +94,36 @@ export interface CheckboxEvidence extends ElementRef {
   nearbyText: string;
 }
 
+/**
+ * A legacy clickable: a toolbar icon, an image inside an anchor, a span with an
+ * onclick handler, a custom dropdown. Readymode Starter's toolbars use these
+ * instead of labelled buttons, so an evidence collector that only looks at
+ * <button> sees an empty screen.
+ *
+ * Purpose is never inferred from appearance. Colour, size and position are
+ * deliberately not collected — only identity and any text a developer attached.
+ */
+export interface ClickableEvidence extends ElementRef {
+  /** Accessible name from any source: text, title, alt, aria-label, value. */
+  label: string;
+  title?: string;
+  alt?: string;
+  ariaLabel?: string;
+  /** Present, not the handler body — enough to know the element is wired up. */
+  hasOnClick: boolean;
+  /** Class list, which in legacy markup often carries the only stable hint. */
+  classes?: string;
+  /** Image file name for icon buttons, which is often the only identifier. */
+  imageSource?: string;
+  /** Nearest heading, table caption or panel title, for disambiguation. */
+  context?: string;
+}
+
+export interface HeadingEvidence {
+  level: number;
+  text: string;
+}
+
 export interface LinkEvidence extends ElementRef {
   label: string;
   href: string;
@@ -106,6 +139,13 @@ export interface TableEvidence extends ElementRef {
   /** Column headings only. Table cells are never read — that is where leads live. */
   headings: string[];
   rowCount: number;
+  /**
+   * Distinct labels of controls that appear inside rows, for example
+   * "Sign Out". Structural: the label of a repeated control, never the row's
+   * data. This is what lets a row-scoped action be recognized without
+   * proposing a selector that would match every row.
+   */
+  rowControls: string[];
 }
 
 export interface NavEvidence {
@@ -129,6 +169,8 @@ export interface RootEvidence {
   links: LinkEvidence[];
   forms: FormEvidence[];
   tables: TableEvidence[];
+  clickables: ClickableEvidence[];
+  headings: HeadingEvidence[];
   /** Categories that hit a cap. */
   truncated: string[];
   /** Set when the root could not be read at all. Recorded, never thrown. */
@@ -141,6 +183,17 @@ export interface PageEvidence {
   step: string;
   pageUrl: string;
   pageTitle: string;
+  /**
+   * Which panel was open, identified by its visible heading.
+   *
+   * Readymode Starter keeps one URL and opens administrative screens as movable
+   * internal panels, so the heading is the only reliable statement of where the
+   * session actually is. "Save" means different things in different panels, and
+   * this is what tells them apart.
+   */
+  panelState: string | null;
+  /** The heading the navigation step expected, when it expected one. */
+  expectedPanelState?: string | null;
   roots: RootEvidence[];
   screenshotPath: string | null;
 }
@@ -176,6 +229,8 @@ export interface CollectorOutput {
   links: LinkEvidence[];
   forms: FormEvidence[];
   tables: TableEvidence[];
+  clickables: ClickableEvidence[];
+  headings: HeadingEvidence[];
   truncated: string[];
   passwordFieldsSeen: number;
 }
@@ -211,7 +266,7 @@ export function enforceSizeCap(
   evidence: InterfaceEvidence,
   maxBytes = EVIDENCE_CAPS.maxEvidenceBytes,
 ): InterfaceEvidence {
-  const order: Array<keyof RootEvidence> = ['links', 'nav', 'checkboxes', 'tables'];
+  const order: Array<keyof RootEvidence> = ['links', 'nav', 'clickables', 'checkboxes', 'tables'];
   let current = evidence;
 
   for (const category of order) {

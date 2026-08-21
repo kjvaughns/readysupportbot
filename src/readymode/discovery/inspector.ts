@@ -3,6 +3,7 @@ import { sanitizePageValue } from '../../security/sanitize';
 import { logger } from '../../security/logger';
 import { scrubDeep, scrubPersonalData } from '../../security/personalData';
 import { LocatorRoot, listSearchRoots, rootName, rootUrl } from '../selectors/frames';
+import { detectPanelState } from '../navigation';
 import { captureScreenshot } from '../session';
 import { collectFromRoot } from './collector';
 import {
@@ -59,6 +60,8 @@ function normalizeRoot(
     links: (scrubbed.links as RootEvidence['links']) ?? [],
     forms: (scrubbed.forms as RootEvidence['forms']) ?? [],
     tables: (scrubbed.tables as RootEvidence['tables']) ?? [],
+    clickables: (scrubbed.clickables as RootEvidence['clickables']) ?? [],
+    headings: (scrubbed.headings as RootEvidence['headings']) ?? [],
     truncated: (scrubbed.truncated as string[]) ?? [],
   };
 }
@@ -68,7 +71,7 @@ export async function inspectCurrentPage(
   page: Page,
   step: string,
   counters: { personalDataDropped: number; passwordFieldsSeen: number },
-  options: { screenshot?: boolean } = {},
+  options: { screenshot?: boolean; expectedPanelState?: string | null } = {},
 ): Promise<PageEvidence> {
   const roots = listSearchRoots(page);
   const collected: RootEvidence[] = [];
@@ -111,6 +114,8 @@ export async function inspectCurrentPage(
         links: [],
         forms: [],
         tables: [],
+        clickables: [],
+        headings: [],
         truncated: [],
         error: detail,
       });
@@ -130,6 +135,11 @@ export async function inspectCurrentPage(
     step,
     pageUrl: sanitizePageValue(page.url(), EVIDENCE_CAPS.maxUrlLength),
     pageTitle: scrubPersonalData(sanitizePageValue(await page.title().catch(() => ''), 200)).text,
+    // Starter keeps one URL for the whole session, so where the session is has
+    // to come from the panel's own heading. The URL above says `/#` on every
+    // screen and identifies nothing.
+    panelState: detectPanelState(collected),
+    expectedPanelState: options.expectedPanelState ?? null,
     roots: collected,
     screenshotPath,
   };

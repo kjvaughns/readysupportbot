@@ -59,7 +59,7 @@ export function serializeStrategy(strategy: SelectorStrategy): SerializedStrateg
   return output;
 }
 
-const VALID_TYPES = new Set(['testId', 'role', 'label', 'placeholder', 'text', 'css']);
+const VALID_TYPES = new Set(['testId', 'rowControl', 'role', 'label', 'placeholder', 'text', 'css']);
 
 export function deserializeStrategy(raw: unknown): SelectorStrategy {
   if (!raw || typeof raw !== 'object') throw new Error('Stored selector is not an object.');

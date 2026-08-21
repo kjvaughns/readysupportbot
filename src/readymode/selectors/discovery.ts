@@ -53,6 +53,8 @@ export function describeStrategy(strategy: SelectorStrategy): string {
   switch (strategy.type) {
     case 'testId':
       return `testId=${strategy.value}`;
+    case 'rowControl':
+      return `rowControl=${strategy.scope}>>${strategy.label}`;
     case 'role':
       return `role=${strategy.role}${strategy.name ? `[name=${String(strategy.name)}]` : ''}`;
     case 'label':
@@ -72,6 +74,11 @@ export function locatorFor(root: LocatorRoot, strategy: SelectorStrategy): Locat
   switch (strategy.type) {
     case 'testId':
       return root.getByTestId(strategy.value);
+    case 'rowControl':
+      // Every row's copy of the control. Counting them is how the control is
+      // verified; acting on one requires `rowControlFor`, which identifies the
+      // row by the user it belongs to.
+      return root.locator(strategy.scope).locator('tr').getByText(strategy.label, { exact: true });
     case 'role':
       return root.getByRole(strategy.role as never, {
         ...(strategy.name ? { name: strategy.name } : {}),
@@ -241,7 +248,13 @@ export async function tryDiscover(
     }
 
     const only = matchesByRoot[0];
-    if (only.count.visible === 1 || (only.count.visible > 1 && options.allowFirstOfMany)) {
+    // A per-row control appearing once in every row is correct, not ambiguous.
+    // It still has to be visible in exactly one root, and a workflow still has
+    // to identify the row before it may click anything.
+    const acceptable =
+      only.count.visible === 1 ||
+      (only.count.visible > 1 && (options.allowFirstOfMany === true || control.perRow === true));
+    if (acceptable) {
       hits.push({
         control: control.name,
         strategy: described,

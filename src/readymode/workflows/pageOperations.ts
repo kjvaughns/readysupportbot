@@ -2,16 +2,17 @@ import type { Locator, Page } from 'playwright-core';
 import { ReadymodeAgent } from '../../types';
 import { sanitizePageValue } from '../../security/sanitize';
 import { WorkflowNeedsConfigurationError } from '../../security/errors';
-import {
-  AGENT_CONTROLS,
-  ROUTES,
-  SAVE_SUCCESS_CONDITIONS,
-  STATE_CONTROLS,
-} from '../selectors';
+import { AGENT_CONTROLS, SAVE_SUCCESS_CONDITIONS, STATE_CONTROLS } from '../selectors';
 import { anyPresent, discover, tryDiscover } from '../selectors/discovery';
 import { allText } from '../selectors/frames';
+import { PanelId, findExactLabel, waitForHeading } from '../navigation';
 import { normalizeState, sortStates } from '../states';
-import { assertNoHumanVerification, navigate, WorkflowContext, waitForResult } from './harness';
+import {
+  assertNoHumanVerification,
+  openWorkflowPanel,
+  WorkflowContext,
+  waitForResult,
+} from './harness';
 
 /**
  * Page-level operations shared by the workflows.
@@ -21,10 +22,21 @@ import { assertNoHumanVerification, navigate, WorkflowContext, waitForResult } f
  * instruction.
  */
 
-/** Reads the agent directory. */
-export async function listAgents(context: WorkflowContext, query?: string): Promise<ReadymodeAgent[]> {
+/**
+ * Reads the user directory.
+ *
+ * The panel is named rather than assumed: User Management lists every account,
+ * while License Usage lists only those currently holding a seat. A caller that
+ * wants seat information has to say so — reading the wrong table and calling the
+ * difference "not logged in" is how a wrong answer would look right.
+ */
+export async function listAgents(
+  context: WorkflowContext,
+  query?: string,
+  options: { panel?: PanelId } = {},
+): Promise<ReadymodeAgent[]> {
   const { page } = context.session;
-  await navigate(context, query ? `${ROUTES.agentSearch}${encodeURIComponent(query)}` : ROUTES.agents);
+  await openWorkflowPanel(context, options.panel ?? 'users');
 
   const search = await tryDiscover(page, AGENT_CONTROLS.search, { timeoutMs: 1200 });
   if (query && search.resolved) {
@@ -83,13 +95,40 @@ async function readAgentRow(row: Locator): Promise<ReadymodeAgent | null> {
   };
 }
 
-/** Opens one agent and confirms the page really is that agent. */
+/**
+ * Opens one user's record and confirms the panel really is that user's.
+ *
+ * There is no detail URL to go to: a user's record opens by clicking their
+ * username inside User Management. The click only happens when that username
+ * resolves to exactly one visible element — the record is identified by who it
+ * belongs to, never by its position in the table.
+ */
 export async function openAgent(context: WorkflowContext, agent: ReadymodeAgent): Promise<void> {
   const { page } = context.session;
-  await navigate(context, ROUTES.agentDetail(agent.readymodeUserId));
+  await openWorkflowPanel(context, 'users');
   await assertNoHumanVerification(page);
 
   const identifier = agent.username || agent.readymodeUserId;
+
+  // Narrow the list first when the panel offers a search, so the username is
+  // unique on screen even in a long directory.
+  const search = await tryDiscover(page, AGENT_CONTROLS.search, { timeoutMs: 1200 });
+  if (search.resolved) {
+    await search.resolved.locator.fill(String(identifier));
+    await search.resolved.locator.press('Enter');
+    await page.waitForLoadState('networkidle').catch(() => undefined);
+  }
+
+  const record = await findExactLabel(page, String(identifier));
+  if (!record) {
+    throw new WorkflowNeedsConfigurationError(
+      `user record for ${sanitizePageValue(String(identifier))} (it was not uniquely visible in User Management)`,
+    );
+  }
+
+  await record.locator.click({ timeout: 8000 });
+  await waitForHeading(page, ['Account Settings', 'Activity Log', 'User Management'], 10_000);
+
   const confirmed = await waitForResult(
     page,
     async () => {

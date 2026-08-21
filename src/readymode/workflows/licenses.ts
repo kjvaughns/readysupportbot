@@ -1,9 +1,19 @@
 import { AppError } from '../../security/errors';
-import { AGENT_CONTROLS, ROUTES } from '../selectors';
+import { AGENT_CONTROLS, LICENSE_CONTROLS } from '../selectors';
 import { discover } from '../selectors/discovery';
 import { describeAgent } from '../agents';
 import { ReadymodeAgent } from '../../types';
-import { WorkflowContext, WorkflowDefinition, navigate, runWorkflow, step, waitForResult } from './harness';
+import { findControlInRow } from '../navigation';
+import { sanitizePageValue } from '../../security/sanitize';
+import { WorkflowNeedsConfigurationError } from '../../security/errors';
+import {
+  WorkflowContext,
+  WorkflowDefinition,
+  openWorkflowPanel,
+  runWorkflow,
+  step,
+  waitForResult,
+} from './harness';
 import { listAgents, openAgent, pageText, saveAgentForm } from './pageOperations';
 
 /**
@@ -36,8 +46,13 @@ export const clearAllLicensesWorkflow: WorkflowDefinition<
   async run(context) {
     // Read first, so the confirmation and the result can both say how many
     // seats were actually in use rather than claiming an unmeasured effect.
-    await navigate(context, ROUTES.agents);
-    const before = await step(context, 'read-before', () => listAgents(context));
+    // "Sign Out Inactive Users" is at the foot of License Usage, beside "Sign
+    // Out Everyone Else" — which signs out every other administrator and is
+    // never a substitute for it.
+    await openWorkflowPanel(context, 'licenses');
+    const before = await step(context, 'read-before', () =>
+      listAgents(context, undefined, { panel: 'licenses' }),
+    );
     const licensesBefore = before.filter((agent) => agent.licenseInUse || agent.loggedIn).length;
 
     if (context.dryRun) {
@@ -67,7 +82,9 @@ export const clearAllLicensesWorkflow: WorkflowDefinition<
     );
 
     // Verify by re-reading rather than trusting the message.
-    const after = await step(context, 'read-after', () => listAgents(context));
+    const after = await step(context, 'read-after', () =>
+      listAgents(context, undefined, { panel: 'licenses' }),
+    );
     const licensesAfter = after.filter((agent) => agent.licenseInUse || agent.loggedIn).length;
     const freed = Math.max(0, licensesBefore - licensesAfter);
 
@@ -92,6 +109,13 @@ export const clearAllLicensesWorkflow: WorkflowDefinition<
   },
 };
 
+/**
+ * The exact label of the per-row control on License Usage, as an operator
+ * reported it. It is deliberately a constant: a workflow that searched for
+ * anything matching "sign out" could find "Sign Out Everyone Else".
+ */
+const ROW_SIGN_OUT_LABEL = 'Sign Out';
+
 export interface ForceLogoutInput {
   agent: ReadymodeAgent;
   resetPassword: boolean;
@@ -106,7 +130,9 @@ export const forceLogoutWorkflow: WorkflowDefinition<
     `Sign ${describeAgent(input.agent)} out of Readymode${input.resetPassword ? ' and reset their password' : ''}`,
 
   async run(context, input) {
-    await step(context, 'open-agent', () => openAgent(context, input.agent));
+    // Signing one person out happens on License Usage, in that person's own row.
+    await openWorkflowPanel(context, 'licenses');
+    await discover(context.session.page, LICENSE_CONTROLS.table, { allowFirstOfMany: true });
 
     if (context.dryRun) {
       return {
@@ -117,20 +143,39 @@ export const forceLogoutWorkflow: WorkflowDefinition<
       };
     }
 
-    const control = await discover(context.session.page, AGENT_CONTROLS.forceLogout);
-    await control.click();
+    const identifier = input.agent.username || input.agent.readymodeUserId;
+
+    // The row is found by the user it belongs to. A row chosen by position would
+    // sign out whoever happened to be sitting in that position.
+    const rowControl = await findControlInRow(context.session.page, {
+      rowIdentifier: String(identifier),
+      label: ROW_SIGN_OUT_LABEL,
+    });
+
+    if (!rowControl) {
+      throw new WorkflowNeedsConfigurationError(
+        `"${ROW_SIGN_OUT_LABEL}" control in the row for ${sanitizePageValue(String(identifier))}` +
+          ' (exactly one matching row with that control was not found)',
+      );
+    }
+
+    await rowControl.locator.click({ timeout: 8000 });
     await context.session.page.waitForLoadState('domcontentloaded').catch(() => undefined);
 
     let passwordReset = false;
     if (input.resetPassword) {
+      // The password lives on the user's own record, not on License Usage.
+      await step(context, 'open-agent', () => openAgent(context, input.agent));
       const reset = await discover(context.session.page, AGENT_CONTROLS.resetPassword);
       await reset.click();
       await saveAgentForm(context).catch(() => undefined);
       passwordReset = true;
     }
 
-    // Verify against the agent list rather than the message on screen.
-    const after = await step(context, 'verify', () => listAgents(context, input.agent.username));
+    // Verify against the licence table rather than the message on screen.
+    const after = await step(context, 'verify', () =>
+      listAgents(context, input.agent.username, { panel: 'licenses' }),
+    );
     const match = after.find(
       (agent) => String(agent.readymodeUserId) === String(input.agent.readymodeUserId),
     );

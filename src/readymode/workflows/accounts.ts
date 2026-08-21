@@ -3,10 +3,17 @@ import { AppError, WorkflowNeedsConfigurationError } from '../../security/errors
 import { sanitizePageValue } from '../../security/sanitize';
 import { NewAccount } from '../../openai/schema';
 import { describeAgent } from '../agents';
-import { AGENT_CONTROLS, LICENSE_CONTROLS, ROUTES } from '../selectors';
+import { AGENT_CONTROLS, LICENSE_CONTROLS } from '../selectors';
 import { discover, tryDiscover } from '../selectors/discovery';
 import { listSearchRoots } from '../selectors/frames';
-import { WorkflowContext, WorkflowDefinition, navigate, runWorkflow, step, waitForResult } from './harness';
+import {
+  WorkflowContext,
+  WorkflowDefinition,
+  openWorkflowPanel,
+  runWorkflow,
+  step,
+  waitForResult,
+} from './harness';
 import { listAgents, openAgent, pageText, saveAgentForm } from './pageOperations';
 
 /**
@@ -54,7 +61,7 @@ export const createAccountWorkflow: WorkflowDefinition<CreateAccountInput, Creat
     }
 
     const { page } = context.session;
-    await navigate(context, ROUTES.agents);
+    await openWorkflowPanel(context, 'users');
     const createButton = await discover(page, AGENT_CONTROLS.createButton);
     await createButton.click();
 
@@ -264,7 +271,7 @@ export const licenseUsageWorkflow: WorkflowDefinition<
   describe: () => 'Read which agents are currently using licenses',
 
   async run(context) {
-    await navigate(context, ROUTES.licenses);
+    await openWorkflowPanel(context, 'licenses');
     await discover(context.session.page, LICENSE_CONTROLS.table, { allowFirstOfMany: true });
 
     const agents = await step(context, 'read-agents', () => listAgents(context));

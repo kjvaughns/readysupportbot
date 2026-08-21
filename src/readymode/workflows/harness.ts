@@ -2,7 +2,12 @@ import type { Page } from 'playwright-core';
 import { logger } from '../../security/logger';
 import { recordEvent } from '../../audit';
 import { WorkflowResult } from '../../types';
-import { AppError, AuthenticationRequiredError } from '../../security/errors';
+import {
+  AppError,
+  AuthenticationRequiredError,
+  WorkflowNeedsConfigurationError,
+} from '../../security/errors';
+import { PANELS, PanelId, openPanel } from '../navigation';
 import { anyPresent } from '../selectors/discovery';
 import { HUMAN_VERIFICATION_CONDITIONS } from '../selectors';
 import { captureScreenshot, ReadymodeSession } from '../session';
@@ -69,12 +74,26 @@ export async function assertNoHumanVerification(page: Page): Promise<void> {
   }
 }
 
-export async function navigate(context: WorkflowContext, path: string): Promise<void> {
+/**
+ * Opens an administrative panel and confirms it by its heading.
+ *
+ * This replaces navigating to a URL. Readymode Starter is a single-page
+ * application: there is no `/admin/users` to go to, and the address stays at
+ * `/#` whichever screen is open, so a URL can neither reach a screen nor prove
+ * one arrived.
+ */
+export async function openWorkflowPanel(context: WorkflowContext, panel: PanelId): Promise<string> {
   const { page } = context.session;
-  const base = new URL(page.url());
-  const destination = path.startsWith('http') ? path : new URL(path, base.origin).toString();
-  await page.goto(destination, { waitUntil: 'domcontentloaded' });
+  const result = await openPanel(page, panel);
+
+  if (!result.opened) {
+    throw new WorkflowNeedsConfigurationError(
+      `"${PANELS[panel].label}" panel (${result.reason ?? 'it did not open'})`,
+    );
+  }
+
   await assertNoHumanVerification(page);
+  return result.heading ?? PANELS[panel].headings[0];
 }
 
 /** Runs a workflow with evidence capture and audit logging around it. */

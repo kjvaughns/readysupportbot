@@ -10,6 +10,13 @@
 
 export type SelectorStrategy =
   | { type: 'testId'; value: string }
+  /**
+   * A control that legitimately appears once per row — the per-row "Sign Out"
+   * on License Usage, for example. `scope` identifies the table uniquely and
+   * `label` is the control's exact visible text; which row is acted on is
+   * decided at run time by matching the user, never by position.
+   */
+  | { type: 'rowControl'; scope: string; label: string }
   | { type: 'role'; role: string; name?: string | RegExp; exact?: boolean }
   | { type: 'label'; value: string | RegExp; exact?: boolean }
   | { type: 'placeholder'; value: string | RegExp }
@@ -24,18 +31,24 @@ export interface ControlDefinition {
   /** When false, a workflow may continue if the control is absent. */
   required: boolean;
   description: string;
+  /**
+   * True for a control that exists once per table row. Resolution accepts more
+   * than one visible match for these — a licence table with eight users has
+   * eight "Sign Out" buttons and that is correct, not ambiguous. The row is
+   * still identified uniquely before anything is clicked.
+   */
+  perRow?: boolean;
 }
 
-export const ROUTES = {
-  login: '/',
-  dashboard: '/admin',
-  agents: '/admin/users',
-  agentSearch: '/admin/users?search=',
-  agentDetail: (readymodeUserId: string) => `/admin/users/${encodeURIComponent(readymodeUserId)}`,
-  licenses: '/admin/licenses',
-  campaigns: '/admin/campaigns',
-  queues: '/admin/queues',
-} as const;
+/**
+ * There is no route table.
+ *
+ * Readymode Starter is a single-page application: the authenticated address is
+ * `https://<tenant>.readymode.com/#` and it stays that way. `/admin/users`,
+ * `/admin/licenses`, `/admin/campaigns` and `/admin/queues` were assumptions,
+ * and they do not exist. Screens are reached by clicking their exact label and
+ * confirmed by the panel heading that appears — see `src/readymode/navigation.ts`.
+ */
 
 export const LABELS = {
   states: ['States', 'State', 'Licensed States', 'State Assignment', 'Assigned States', 'Territories'],
@@ -49,7 +62,8 @@ const control = (
   description: string,
   candidates: SelectorStrategy[],
   required = true,
-): ControlDefinition => ({ name, description, candidates, required });
+  extra: { perRow?: boolean } = {},
+): ControlDefinition => ({ name, description, candidates, required, ...extra });
 
 export const LOGIN_CONTROLS = {
   username: control('login.username', 'Readymode administrator username field', [
@@ -118,30 +132,51 @@ export const AGENT_CONTROLS = {
     { type: 'testId', value: 'clear-license' },
     { type: 'role', role: 'button', name: /clear licen[cs]e|release licen[cs]e|force ?logout/i },
   ]),
-  resetPassword: control('agents.reset_password', 'Reset password control on an agent', [
-    { type: 'testId', value: 'reset-password' },
-    { type: 'role', role: 'button', name: /reset password|change password/i },
-  ]),
+  resetPassword: control(
+    'agents.reset_password',
+    'Reset button beside the Reset password field on a user\'s Account Settings tab',
+    [
+      { type: 'testId', value: 'reset-password' },
+      { type: 'role', role: 'button', name: 'Reset', exact: true },
+      { type: 'role', role: 'button', name: /^reset password$/i },
+    ],
+  ),
   deactivate: control('agents.deactivate', 'Deactivate agent control', [
     { type: 'testId', value: 'deactivate-agent' },
     { type: 'role', role: 'button', name: /deactivate|disable|suspend/i },
   ]),
   /**
-   * Readymode's own control for releasing idle sessions, on the Users screen.
-   * The label here was supplied by an operator who uses it, so it is a reported
-   * observation rather than a guess — but it still has to resolve uniquely in
-   * the real interface before any workflow will click it.
+   * Readymode's own control for releasing idle sessions. An operator placed it
+   * at the foot of License Usage, beside "Sign Out Myself" and "Sign Out
+   * Everyone Else", and gave its exact label. That is a reported observation
+   * rather than a guess — but it still has to resolve uniquely in the real
+   * interface before any workflow will click it.
    */
-  logOutInactive: control('users.log_out_inactive', 'Log Out Inactive Users button on the Users screen', [
-    { type: 'testId', value: 'log-out-inactive' },
-    { type: 'role', role: 'button', name: /log\s?out\s+inactive(\s+users)?/i },
-    { type: 'text', value: /log\s?out\s+inactive(\s+users)?/i },
-    { type: 'css', value: 'input[type="submit"][value*="Inactive" i]' },
-  ]),
-  forceLogout: control('agents.force_logout', 'Control that signs one agent out of Readymode', [
-    { type: 'testId', value: 'force-logout' },
-    { type: 'role', role: 'button', name: /log\s?out|sign\s?out|force\s?logout|end\s+session/i },
-  ]),
+  logOutInactive: control(
+    'users.log_out_inactive',
+    'Sign Out Inactive Users button at the foot of License Usage',
+    [
+      { type: 'testId', value: 'log-out-inactive' },
+      // The exact label, as it reads in the real interface. "Sign Out Everyone
+      // Else" sits beside it and signs out every other administrator — it is
+      // never an acceptable substitute, so nothing here may match it.
+      { type: 'role', role: 'button', name: 'Sign Out Inactive Users', exact: true },
+      { type: 'text', value: 'Sign Out Inactive Users', exact: true },
+      { type: 'css', value: 'input[type="submit"][value="Sign Out Inactive Users" i]' },
+    ],
+  ),
+  forceLogout: control(
+    'agents.force_logout',
+    'Sign Out button inside one user\'s row on License Usage',
+    [
+      { type: 'testId', value: 'force-logout' },
+      // Row-scoped by construction. The row is chosen by matching the user, so
+      // the control never depends on a position in the table.
+      { type: 'rowControl', scope: 'table', label: 'Sign Out' },
+    ],
+    true,
+    { perRow: true },
+  ),
   saveButton: control('agents.save', 'Save button on the agent detail form', [
     { type: 'testId', value: 'save-agent' },
     { type: 'role', role: 'button', name: /^\s*(save|update|apply)\s*$/i },
@@ -197,46 +232,55 @@ export const SAVE_SUCCESS_CONDITIONS: SelectorStrategy[] = [
 ];
 
 export const CAMPAIGN_CONTROLS = {
-  section: control('campaigns.section', 'Campaign assignment section', [
+  section: control('campaigns.section', 'Campaigns tab of Lead Management', [
     { type: 'testId', value: 'agent-campaigns' },
-    { type: 'role', role: 'group', name: /campaigns?/i },
+    { type: 'role', role: 'tab', name: 'Campaigns', exact: true },
+    { type: 'text', value: 'Campaigns', exact: true },
     { type: 'css', value: '[data-field="campaigns"]' },
   ]),
-  save: control('campaigns.save', 'Save button for campaign assignment', [
+  save: control('campaigns.save', 'Save button inside Campaign Settings', [
     { type: 'testId', value: 'save-campaigns' },
-    { type: 'role', role: 'button', name: /save|update|apply/i },
+    { type: 'role', role: 'button', name: 'Save', exact: true },
   ]),
 } as const;
 
 export const PLAYLIST_CONTROLS = {
-  section: control('playlists.section', 'Playlist membership section on an agent', [
+  section: control('playlists.section', 'Playlist membership inside a queue\'s Members tab', [
     { type: 'testId', value: 'agent-playlists' },
+    // Queue membership is organized into playlists, and each playlist offers
+    // "Add a queue member" — the phrase is the section's clearest marker.
+    { type: 'text', value: 'Add a queue member', exact: true },
     { type: 'role', role: 'group', name: /playlists?|lead pools?/i },
     { type: 'css', value: '[data-field="playlists"]' },
   ]),
-  save: control('playlists.save', 'Save button for playlist membership', [
+  save: control('playlists.save', 'Save button inside the Lead Playlist Editor', [
     { type: 'testId', value: 'save-playlists' },
-    { type: 'role', role: 'button', name: /save|update|apply/i },
+    { type: 'role', role: 'button', name: 'Save and Close', exact: true },
+    { type: 'role', role: 'button', name: 'Save', exact: true },
   ]),
 } as const;
 
 export const QUEUE_CONTROLS = {
-  section: control('queues.section', 'Queue assignment section', [
+  section: control('queues.section', 'Queues tab of Lead Management', [
     { type: 'testId', value: 'agent-queues' },
-    { type: 'role', role: 'group', name: /queues?/i },
+    { type: 'role', role: 'tab', name: 'Queues', exact: true },
+    { type: 'text', value: 'Queues', exact: true },
     { type: 'css', value: '[data-field="queues"]' },
   ]),
-  save: control('queues.save', 'Save button for queue assignment', [
+  save: control('queues.save', 'Save button inside Edit Queue', [
     { type: 'testId', value: 'save-queues' },
-    { type: 'role', role: 'button', name: /save|update|apply/i },
+    { type: 'role', role: 'button', name: 'Save and Close', exact: true },
+    { type: 'role', role: 'button', name: 'Save', exact: true },
   ]),
 } as const;
 
 export const LICENSE_CONTROLS = {
-  table: control('licenses.table', 'Table of licenses currently in use', [
+  table: control('licenses.table', 'Table of users holding a licence on License Usage', [
     { type: 'testId', value: 'license-table' },
-    { type: 'css', value: 'table' },
-    { type: 'role', role: 'table' },
+    // Identified by the column headings an operator observed, so it is not
+    // confused with the two summary tables above it on the same screen.
+    { type: 'css', value: 'table:has(th:text-is("License Type"))' },
+    { type: 'css', value: 'table:has(th:text-is("Last Active"))' },
   ]),
 } as const;
 
