@@ -8,7 +8,7 @@ import { invalidateProfileCache } from '../selectors/resolve';
 import { ReadymodeSession } from '../session';
 import { resolveCredentials } from '../credentials';
 import { InterfaceEvidence, rootStats } from './evidence';
-import { discoverInterface } from './walk';
+import { PanelVisit, discoverInterface } from './walk';
 import { ProposedSelector, proposeSelectors, promotable } from './propose';
 import { AppError } from '../../security/errors';
 
@@ -29,6 +29,8 @@ export interface DiscoveryRunResult {
   profile: InterfaceProfileWithSelectors;
   visited: string[];
   skipped: Array<{ label: string; reason: string }>;
+  /** Every screen the walk tried, with the heading it expected and the one it got. */
+  panels: PanelVisit[];
   proposals: ProposedSelector[];
   unproposed: Array<{ control: string; reason: string }>;
   notObservable: Array<{ control: string; reason: string }>;
@@ -174,6 +176,12 @@ export async function runDiscovery(input: {
     data: {
       profileId: profile.id,
       visited: walk.visited,
+      panels: walk.panels.map((panel) => ({
+        step: `${panel.route}/${panel.step}`,
+        expected: panel.expectedHeading,
+        observed: panel.observedHeading,
+        opened: panel.opened,
+      })),
       unproposed: unproposed.map((entry) => entry.control),
     },
   });
@@ -184,6 +192,7 @@ export async function runDiscovery(input: {
     profile,
     visited: walk.visited,
     skipped: walk.skipped,
+    panels: walk.panels,
     proposals,
     unproposed,
     notObservable,

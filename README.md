@@ -93,6 +93,7 @@ closed schema; anything that does not fit becomes a question back to the user.
 ## Layout
 
 ```
+data              The recorded interface inspection and the Help Center bank
 src/api           HTTP server and frontend endpoints
 src/approvals     Confirmation rules, second approver, ten-minute expiry
 src/audit         Audit log
@@ -105,8 +106,11 @@ src/notifications Owner notifications
 src/openai        Natural language to validated action
 src/permissions   Roles and permissions
 src/queue         Serial job queue and status machine
-src/readymode     Sessions, credentials, agent matching, states
-src/readymode/selectors   Centralized routes, labels, selectors, discovery
+src/knowledge     Help Center bank, crawler, parser, retrieval, answering
+src/readymode     Sessions, credentials, agent matching, states, navigation
+src/readymode/interface   The interface registry: controls, evidence status, workflow status
+src/readymode/discovery   Read-only evidence collection and selector proposal
+src/readymode/selectors   Control definitions, frame-aware resolution, capabilities
 src/readymode/workflows   Predefined Playwright workflows
 src/security      Encryption, redaction, sanitization, errors, ids
 src/types         Shared types
@@ -141,6 +145,57 @@ npm run register:commands              # global, up to an hour to propagate
 GUILD_ID=<id> npm run register:commands  # one server, applies immediately
 ```
 
+Load the Help Center documentation:
+
+```bash
+npm run knowledge:seed   # stores the supplied bank; no network needed
+npm run knowledge:sync   # fetches and parses the real articles
+```
+
+`knowledge:seed` stores 13 articles that carry real content and 134 that are
+titles with none. Only the first group is ever answered from. `knowledge:sync`
+reaches help.readymode.com, so it runs where that is reachable — on Railway
+rather than from a sandbox with no egress.
+
+## What it knows about Readymode, and how sure it is
+
+Two separate things, kept in separate places on purpose.
+
+**The interface registry** (`src/readymode/interface/`) says which element to
+click. It is transcribed from a read-only inspection of a real administrator
+account, recorded in `data/readysupport_interface_map.json`, and every control
+carries its own evidence status:
+
+| Status | Means |
+| --- | --- |
+| `documented` | An article or an operator described it. Nobody has seen it. |
+| `discovered` | It was seen on a real screen. |
+| `implemented` | ReadySupport has code for it — which says nothing about Readymode. |
+| `dry_run_tested` | Run against the real account without saving. |
+| `live_tested` | Run for real and verified. |
+| `blocked` | Looked for and not resolvable. The reason is recorded. |
+| `unsupported` | Deliberately never automated. |
+
+Only `discovered`, `dry_run_tested` and `live_tested` may be proposed for
+automation, and evidence alone still does not authorize a change: a modifying
+capability additionally requires a selector profile an Owner approved for that
+organization. Those are different claims — one is about the interface, the other
+is about permission — and both are required.
+
+`GET /api/readymode/capabilities` returns the whole table, including what is
+blocking each workflow that is not ready.
+
+**The knowledge bank** (`src/knowledge/`) holds public Help Center documentation
+that gets quoted to people with a link to the original. It never supplies a
+selector, and an article ReadySupport has not actually fetched is never answered
+from — instructions written from a title are invented instructions that happen
+to sound official.
+
+Readymode Starter and Readymode iQ have different screens. Every answer says
+which product it is describing, and where an article disagrees with the live
+interface, the reply names the likely cause: interface version, account
+permissions, or outdated documentation.
+
 ## Safety model
 
 - **Dry run by default.** `DRY_RUN=true` means workflows read Readymode and
@@ -159,9 +214,25 @@ GUILD_ID=<id> npm run register:commands  # one server, applies immediately
   Owner is notified, the request is marked as authentication required, and work
   resumes only after reconnecting through the frontend.
 - **Nothing about Readymode's markup is assumed.** Controls are resolved through
-  a discovery system that accepts a match only when exactly one element is found.
-  If the right control cannot be identified, the workflow stops and reports that
-  it needs configuration.
+  a discovery system that accepts a match only when exactly one element is found,
+  in exactly one frame. If the right control cannot be identified, the workflow
+  stops and reports that it needs configuration. A control that legitimately
+  appears once per table row — the per-row "Sign Out" on License Usage — is
+  resolved by matching the row to the account it belongs to, never by position.
+- **Arrival is confirmed by the screen, not the address.** Navigation goes to the
+  inspected route and then waits for the panel heading. A legacy shell answers
+  with a page whether or not the screen opened, so believing the URL would have
+  every workflow acting on whatever was already there.
+- **Evidence is metadata.** Discovery records labels, element types, routes,
+  frame names, table headings and selector attributes. It never reads a field
+  value, a tick box, a cookie, storage, or the body of a table. A dropdown's
+  options are captured only when the field's identity says it lists a
+  configuration vocabulary rather than people.
+- **Every request is classified** as a question, a read-only check, a proposed
+  change, an approved change, or something ReadySupport will not do. Before a
+  change runs, the confirmation shows what was understood, what would change,
+  whose account it touches, which controls it would use and where each selector
+  came from, what approval is required, and what success would look like.
 - **Untrusted input.** Discord messages and Readymode page content are treated as
   data, never as instructions. Instruction-like text is neutralized before it
   reaches the model and recorded in the audit log.

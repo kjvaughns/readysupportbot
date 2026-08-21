@@ -242,6 +242,62 @@ CAPTCHA and multi-factor prompts are never bypassed. When one appears:
 4. An Owner or Administrator reconnects with `POST /api/readymode/reconnect`.
 5. Queued work resumes.
 
+## Loading the Readymode documentation
+
+Run once after deploying, and on a schedule afterwards:
+
+```bash
+npm run knowledge:seed   # no network; stores the supplied bank
+npm run knowledge:sync   # fetches and parses the real Help Center articles
+```
+
+On Railway, run these from the service shell, or add a cron service that runs
+`npm run knowledge:sync` daily. `KNOWLEDGE_MAX_ARTICLES` bounds one run (default
+200) so a first sync can be a small one.
+
+The sync is polite by construction: one request at a time, a second between
+them, conditional requests so an unchanged article costs a 304, and a hard
+refusal to fetch anything that is not an official `help.readymode.com/support/`
+page. Re-running it is cheap and safe.
+
+What it reports:
+
+- `succeeded` — every folder was read and every article parsed.
+- `partial` — some articles were stored and some failed. The failures keep
+  whatever content they already had, and the reason is recorded on each one.
+- `failed` — nothing was read. Nothing is ever marked removed on the strength of
+  a run like this.
+
+## Learning the interface
+
+```bash
+# Read-only. Walks the administrative screens and proposes selectors.
+curl -X POST https://<app>/api/readymode/discover \
+  -H "Authorization: Bearer <owner token>" \
+  -H "X-Organization-Id: <organization id>"
+
+# What it found, and what is blocking anything it did not.
+curl https://<app>/api/readymode/capabilities \
+  -H "Authorization: Bearer <owner token>" \
+  -H "X-Organization-Id: <organization id>"
+
+# An Owner approves the profile. Until this, no change may run.
+curl -X POST https://<app>/api/readymode/profiles/<profile id>/approve \
+  -H "Authorization: Bearer <owner token>" \
+  -H "X-Organization-Id: <organization id>"
+```
+
+Discovery never clicks save, submits a form, or changes anything. It opens
+screens by their inspected route, confirms each one by the heading that appears,
+and refuses to click any label outside a fixed allowlist.
+
+A profile that only identified the login controls cannot be approved: signing in
+proves the credentials work and says nothing about the administrative interface.
+
+Keep `DRY_RUN=true` until each workflow has been run against the real account and
+verified. The status table at `/api/readymode/capabilities` is the record of how
+far each one has actually got.
+
 ## Operating notes
 
 - Watch `/ready`. It reports Discord, Supabase, Browserbase, Readymode, OpenAI,

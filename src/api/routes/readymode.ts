@@ -16,6 +16,14 @@ import { ALL_CONTROLS } from '../../readymode/selectors';
 import { discoveryReport } from '../../readymode/selectors/discovery';
 import { bindProfile, invalidateProfileCache, loadProfile } from '../../readymode/selectors/resolve';
 import { runDiscovery } from '../../readymode/discovery';
+import {
+  BLOCKED_AREAS,
+  INSPECTION_DATE,
+  INTERFACE_CONTROLS,
+} from '../../readymode/interface/registry';
+import { isAutomatable } from '../../readymode/interface/types';
+import { statusProblems, statusTable } from '../../readymode/interface/workflows';
+import { bankCoverage } from '../../knowledge/bank';
 import { NotFoundError, ValidationError, toSafeMessage } from '../../security/errors';
 import { config } from '../../config';
 
@@ -222,6 +230,12 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
         },
         visited: result.visited,
         skipped: result.skipped,
+        // Which screens were opened, and whether the heading each one expected
+        // actually appeared. A run that navigated everywhere and confirmed
+        // nothing looks identical to a successful one without this.
+        panels: result.panels,
+        panelsOpened: result.panels.filter((panel) => panel.opened).length,
+        panelsExpected: result.panels.length,
         // Proposals carry no raw evidence — only what justifies each one.
         proposals: result.proposals.map((proposal) => ({
           control: proposal.control,
@@ -256,6 +270,7 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
         message: [
           `Captured ${result.evidenceSummary.pages} page(s) across ${result.roots.total} frame(s)` +
             `${result.roots.failed > 0 ? ` (${result.roots.failed} unreadable)` : ''}.`,
+          `Opened ${result.panels.filter((panel) => panel.opened).length} of ${result.panels.length} screen(s) it tried.`,
           `Proposed ${result.profile.controlsProposed} of ${result.profile.controlsTotal} controls;` +
             ` ${result.unproposed.length} unresolved` +
             `${result.notObservable.length > 0 ? `, ${result.notObservable.length} not on screen this run` : ''}.`,
@@ -270,6 +285,51 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       await session.close().catch(() => undefined);
     }
+  });
+
+  /**
+   * The honest status table.
+   *
+   * Every workflow, what evidence stands behind it, and what is blocking the
+   * ones that are not ready. Read-only and available to any member, because the
+   * point of it is that nobody has to take ReadySupport's word for what works.
+   */
+  app.get('/readymode/capabilities', async (request) => {
+    const context = await requireAccess(request, 'view_activity');
+    const profile = await getStore().getActiveInterfaceProfile(context.organizationId);
+
+    return {
+      // What an Owner has approved for this organization, which is what decides
+      // whether a change may run at all.
+      approvedProfile: profile
+        ? {
+            id: profile.id,
+            interfaceVersion: profile.interfaceVersion,
+            approvedAt: profile.approvedAt,
+            verifiedControls: profile.selectors.filter((selector) => selector.verified).length,
+          }
+        : null,
+      // What the recorded inspection supports, independent of any approval.
+      inspection: {
+        capturedAt: INSPECTION_DATE,
+        controls: INTERFACE_CONTROLS.map((control) => ({
+          key: control.key,
+          page: control.page,
+          evidenceStatus: control.evidenceStatus,
+          safety: control.safety,
+          interfaceVersion: control.interfaceVersion,
+          usableForAutomation: isAutomatable(control.evidenceStatus),
+          lastVerified: control.lastVerified,
+          notes: control.notes ?? null,
+        })),
+        blockedAreas: BLOCKED_AREAS,
+      },
+      workflows: statusTable(),
+      // Empty unless a workflow claims more evidence than its controls have,
+      // which would be a bug in the registry rather than a fact about Readymode.
+      statusProblems: statusProblems(),
+      knowledge: await knowledgeSummary(),
+    };
   });
 
   /** Discovery profiles, newest first. Metadata only. */
@@ -326,6 +386,18 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
       // of a verified interface while changing nothing.
       throw new ValidationError(
         'This profile did not identify any control uniquely, so approving it would not make any capability usable. Run discovery again.',
+      );
+    }
+
+    // A run that only ever saw the login page proves the credentials work and
+    // nothing else. Approving it would mark the interface verified on the
+    // strength of a sign-in, which is exactly the false confidence this whole
+    // approval step exists to prevent.
+    const beyondLogin = usable.filter((selector) => !selector.controlName.startsWith('login.'));
+    if (beyondLogin.length === 0) {
+      throw new ValidationError(
+        'This profile only identified the login controls, so it says nothing about the administrative interface. ' +
+          'Run discovery again from a signed-in session so it can reach User Management, License Usage and Lead Management.',
       );
     }
 
@@ -440,4 +512,41 @@ function buildTestMessage(
   return hasProfile
     ? `Signed in. These capabilities are not usable yet: ${list}. Run interface discovery again to cover them.`
     : `Signed in, but no discovery profile has been approved, so no change can be made yet. Not usable: ${list}. An Owner should run POST /api/readymode/discover and approve the result.`;
+}
+
+/**
+ * How much of the Help Center has actually been read.
+ *
+ * Reported as three separate numbers rather than one percentage, because
+ * "147 articles" and "13 articles ReadySupport can answer from" are different
+ * claims and only the second one is about what it can do.
+ */
+async function knowledgeSummary(): Promise<{
+  foldersCataloged: number;
+  articlesCataloged: number;
+  articlesWithContent: number;
+  articlesAnswerable: number;
+  lastSync: { status: string; finishedAt: string | null } | null;
+}> {
+  const store = getStore();
+  const coverage = bankCoverage();
+
+  let answerable = 0;
+  try {
+    answerable = (
+      await store.listKnowledgeArticles({ statuses: ['normalized', 'fetched'], limit: 1000 })
+    ).length;
+  } catch {
+    // A database that cannot answer is reported as zero read, not as unknown.
+  }
+
+  const lastRun = await store.latestKnowledgeSyncRun().catch(() => null);
+
+  return {
+    foldersCataloged: coverage.folders,
+    articlesCataloged: coverage.articlesCataloged,
+    articlesWithContent: coverage.articlesNormalized,
+    articlesAnswerable: answerable,
+    lastSync: lastRun ? { status: lastRun.status, finishedAt: lastRun.finishedAt } : null,
+  };
 }

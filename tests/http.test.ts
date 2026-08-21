@@ -127,6 +127,19 @@ describe('API surface', () => {
   });
 });
 
+describe('the honest status endpoint', () => {
+  it('is gated like everything else', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/readymode/capabilities',
+      headers: { 'x-organization-id': 'org-a' },
+    });
+    // 401 rather than 404 proves the route exists and requires a caller.
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error).toBe('unauthenticated');
+  });
+});
+
 describe('slash command registration endpoint', () => {
   it('requires authentication', async () => {
     const response = await app.inject({
