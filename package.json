@@ -19,13 +19,16 @@
     "test:watch": "vitest",
     "register:commands": "tsx src/discord/registerCommands.ts",
     "selectors:apply": "tsx scripts/applySelectors.ts",
-    "selectors:check": "tsx scripts/applySelectors.ts --check"
+    "selectors:check": "tsx scripts/applySelectors.ts --check",
+    "knowledge:seed": "tsx scripts/syncKnowledge.ts --seed-only",
+    "knowledge:sync": "tsx scripts/syncKnowledge.ts"
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.6.0",
     "@fastify/cors": "^10.0.1",
     "@fastify/rate-limit": "^10.2.1",
     "@supabase/supabase-js": "^2.47.10",
+    "cheerio": "^1.0.0",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.0",

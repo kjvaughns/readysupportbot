@@ -1,3 +1,9 @@
+import type {
+  ArticleSyncStatus,
+  KnowledgeArticle,
+  KnowledgeFolder,
+  SyncRunSummary,
+} from '../knowledge/types';
 import { SupabaseClient } from '@supabase/supabase-js';
 import {
   AutomationApproval,
@@ -975,6 +981,216 @@ export class SupabaseStore implements DataStore {
   }
 
   // -- Settings -------------------------------------------------------------
+
+  // -- Help Center knowledge -------------------------------------------------
+
+  private static readonly ARTICLE_COLUMNS =
+    'id, article_url, category, folder, article_title, last_updated, supported_user_role, product, ' +
+    'summary, step_by_step_instructions, warnings, troubleshooting, related_articles, ' +
+    'source_citations, sync_status, content_hash, fetched_at, last_error';
+
+  private toArticle(row: Record<string, unknown>): KnowledgeArticle {
+    return {
+      articleUrl: String(row.article_url),
+      category: String(row.category ?? ''),
+      folder: String(row.folder ?? ''),
+      articleTitle: String(row.article_title ?? ''),
+      lastUpdated: (row.last_updated as string) ?? null,
+      supportedUserRole: (row.supported_user_role as string[]) ?? [],
+      product: String(row.product ?? 'Readymode Starter'),
+      summary: String(row.summary ?? ''),
+      stepByStepInstructions: (row.step_by_step_instructions as string[]) ?? [],
+      warnings: (row.warnings as string[]) ?? [],
+      troubleshooting: (row.troubleshooting as string[]) ?? [],
+      relatedArticles: (row.related_articles as string[]) ?? [],
+      sourceCitations: (row.source_citations as string[]) ?? [],
+      syncStatus: (row.sync_status as ArticleSyncStatus) ?? 'cataloged',
+      contentHash: (row.content_hash as string) ?? null,
+      fetchedAt: (row.fetched_at as string) ?? null,
+      lastError: (row.last_error as string) ?? null,
+    };
+  }
+
+  async upsertKnowledgeFolders(folders: KnowledgeFolder[]): Promise<number> {
+    if (folders.length === 0) return 0;
+
+    const { error } = await this.client.from('knowledge_folders').upsert(
+      folders.map((folder) => ({
+        category: folder.category,
+        folder: folder.folder,
+        url: folder.url,
+        expected_article_count: folder.expectedArticleCount,
+        known_article_titles: folder.knownArticleTitles,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: 'folder' },
+    );
+    if (error) this.fail('upsertKnowledgeFolders', error);
+    return folders.length;
+  }
+
+  async listKnowledgeFolders(): Promise<KnowledgeFolder[]> {
+    const { data, error } = await this.client
+      .from('knowledge_folders')
+      .select('category, folder, url, expected_article_count, known_article_titles')
+      .order('folder');
+    if (error) this.fail('listKnowledgeFolders', error);
+
+    return (data ?? []).map((row) => ({
+      category: String(row.category ?? ''),
+      folder: String(row.folder),
+      url: String(row.url),
+      expectedArticleCount: Number(row.expected_article_count ?? 0),
+      knownArticleTitles: (row.known_article_titles as string[]) ?? [],
+    }));
+  }
+
+  async upsertKnowledgeArticle(
+    article: KnowledgeArticle,
+  ): Promise<{ changed: boolean; created: boolean }> {
+    const { data: existingRow, error: readError } = await this.client
+      .from('knowledge_articles')
+      // ARTICLE_COLUMNS already carries id, content_hash and fetched_at.
+      .select(SupabaseStore.ARTICLE_COLUMNS)
+      .eq('article_url', article.articleUrl)
+      .maybeSingle();
+    if (readError) this.fail('upsertKnowledgeArticle.read', readError);
+
+    // The client types a select-by-string as possibly-an-error union; the
+    // error case was already handled above, so this narrows through unknown.
+    const existing = (existingRow ?? null) as unknown as Record<string, unknown> | null;
+    const changed = !existing || existing.content_hash !== article.contentHash;
+
+    // The previous version is written first. If the update then fails, a
+    // duplicate version row is the cost — losing the old text would be worse.
+    if (existing && changed && existing.content_hash) {
+      const { error: versionError } = await this.client.from('knowledge_article_versions').insert({
+        article_id: existing.id,
+        content_hash: existing.content_hash,
+        captured_at: (existing.fetched_at as string) ?? new Date().toISOString(),
+        payload: this.toArticle(existing as Record<string, unknown>),
+      });
+      // A repeated hash means this version is already kept, which is fine.
+      if (versionError && versionError.code !== '23505') {
+        this.fail('upsertKnowledgeArticle.version', versionError);
+      }
+    }
+
+    const { error } = await this.client.from('knowledge_articles').upsert(
+      {
+        article_url: article.articleUrl,
+        category: article.category,
+        folder: article.folder,
+        article_title: article.articleTitle,
+        last_updated: article.lastUpdated,
+        supported_user_role: article.supportedUserRole,
+        product: article.product,
+        summary: article.summary,
+        step_by_step_instructions: article.stepByStepInstructions,
+        warnings: article.warnings,
+        troubleshooting: article.troubleshooting,
+        related_articles: article.relatedArticles,
+        source_citations: article.sourceCitations,
+        sync_status: article.syncStatus,
+        content_hash: article.contentHash,
+        fetched_at: article.fetchedAt,
+        last_error: article.lastError ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'article_url' },
+    );
+    if (error) this.fail('upsertKnowledgeArticle', error);
+
+    return { changed, created: !existing };
+  }
+
+  async getKnowledgeArticle(articleUrl: string): Promise<KnowledgeArticle | null> {
+    const { data, error } = await this.client
+      .from('knowledge_articles')
+      .select(SupabaseStore.ARTICLE_COLUMNS)
+      .eq('article_url', articleUrl)
+      .maybeSingle();
+    if (error) this.fail('getKnowledgeArticle', error);
+    return data ? this.toArticle(data as unknown as Record<string, unknown>) : null;
+  }
+
+  async listKnowledgeArticles(
+    filter: { statuses?: ArticleSyncStatus[]; folder?: string; limit?: number } = {},
+  ): Promise<KnowledgeArticle[]> {
+    let query = this.client.from('knowledge_articles').select(SupabaseStore.ARTICLE_COLUMNS);
+    if (filter.statuses?.length) query = query.in('sync_status', filter.statuses);
+    if (filter.folder) query = query.eq('folder', filter.folder);
+
+    const { data, error } = await query.limit(filter.limit ?? 500);
+    if (error) this.fail('listKnowledgeArticles', error);
+    return (data ?? []).map((row) => this.toArticle(row as unknown as Record<string, unknown>));
+  }
+
+  async listKnowledgeVersions(
+    articleUrl: string,
+    limit: number,
+  ): Promise<Array<{ contentHash: string; capturedAt: string }>> {
+    const { data: article, error: readError } = await this.client
+      .from('knowledge_articles')
+      .select('id')
+      .eq('article_url', articleUrl)
+      .maybeSingle();
+    if (readError) this.fail('listKnowledgeVersions.article', readError);
+    if (!article) return [];
+
+    const { data, error } = await this.client
+      .from('knowledge_article_versions')
+      .select('content_hash, captured_at')
+      .eq('article_id', article.id)
+      .order('captured_at', { ascending: false })
+      .limit(limit);
+    if (error) this.fail('listKnowledgeVersions', error);
+
+    return (data ?? []).map((row) => ({
+      contentHash: String(row.content_hash),
+      capturedAt: String(row.captured_at),
+    }));
+  }
+
+  async recordKnowledgeSyncRun(summary: SyncRunSummary): Promise<void> {
+    const { error } = await this.client.from('knowledge_sync_runs').insert({
+      started_at: summary.startedAt,
+      finished_at: summary.finishedAt,
+      status: summary.status,
+      folders_seen: summary.foldersSeen,
+      articles_seen: summary.articlesSeen,
+      articles_fetched: summary.articlesFetched,
+      articles_changed: summary.articlesChanged,
+      articles_failed: summary.articlesFailed,
+      complete_pass: summary.completePass,
+      errors: summary.errors,
+    });
+    if (error) this.fail('recordKnowledgeSyncRun', error);
+  }
+
+  async latestKnowledgeSyncRun(): Promise<SyncRunSummary | null> {
+    const { data, error } = await this.client
+      .from('knowledge_sync_runs')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) this.fail('latestKnowledgeSyncRun', error);
+    if (!data) return null;
+
+    return {
+      startedAt: String(data.started_at),
+      finishedAt: (data.finished_at as string) ?? null,
+      status: data.status as SyncRunSummary['status'],
+      foldersSeen: Number(data.folders_seen ?? 0),
+      articlesSeen: Number(data.articles_seen ?? 0),
+      articlesFetched: Number(data.articles_fetched ?? 0),
+      articlesChanged: Number(data.articles_changed ?? 0),
+      articlesFailed: Number(data.articles_failed ?? 0),
+      completePass: data.complete_pass === true,
+      errors: (data.errors as SyncRunSummary['errors']) ?? [],
+    };
+  }
 
   async getSetting<T = unknown>(organizationId: string, key: string): Promise<T | null> {
     const { data, error } = await this.client

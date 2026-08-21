@@ -1,3 +1,9 @@
+import type {
+  ArticleSyncStatus,
+  KnowledgeArticle,
+  KnowledgeFolder,
+  SyncRunSummary,
+} from '../knowledge/types';
 import { randomUUID } from 'node:crypto';
 import {
   AutomationApproval,
@@ -539,6 +545,74 @@ export class MemoryStore implements DataStore {
 
   async getInterfaceEvidence(profileId: string): Promise<unknown | null> {
     return this.interfaceEvidence.get(profileId) ?? null;
+  }
+
+  // -- Help Center knowledge -------------------------------------------------
+
+  private knowledgeFolders = new Map<string, KnowledgeFolder>();
+
+  private knowledgeArticles = new Map<string, KnowledgeArticle>();
+
+  private knowledgeVersions = new Map<string, Array<{ contentHash: string; capturedAt: string }>>();
+
+  private knowledgeRuns: SyncRunSummary[] = [];
+
+  async upsertKnowledgeFolders(folders: KnowledgeFolder[]): Promise<number> {
+    for (const folder of folders) this.knowledgeFolders.set(folder.folder, { ...folder });
+    return folders.length;
+  }
+
+  async listKnowledgeFolders(): Promise<KnowledgeFolder[]> {
+    return [...this.knowledgeFolders.values()];
+  }
+
+  async upsertKnowledgeArticle(
+    article: KnowledgeArticle,
+  ): Promise<{ changed: boolean; created: boolean }> {
+    const existing = this.knowledgeArticles.get(article.articleUrl);
+    const changed = !existing || existing.contentHash !== article.contentHash;
+
+    // The previous version is kept before the new one replaces it, so an answer
+    // given last month can still be explained.
+    if (existing && changed && existing.contentHash) {
+      const versions = this.knowledgeVersions.get(article.articleUrl) ?? [];
+      versions.unshift({
+        contentHash: existing.contentHash,
+        capturedAt: existing.fetchedAt ?? new Date().toISOString(),
+      });
+      this.knowledgeVersions.set(article.articleUrl, versions);
+    }
+
+    this.knowledgeArticles.set(article.articleUrl, { ...article });
+    return { changed, created: !existing };
+  }
+
+  async getKnowledgeArticle(articleUrl: string): Promise<KnowledgeArticle | null> {
+    return this.knowledgeArticles.get(articleUrl) ?? null;
+  }
+
+  async listKnowledgeArticles(
+    filter: { statuses?: ArticleSyncStatus[]; folder?: string; limit?: number } = {},
+  ): Promise<KnowledgeArticle[]> {
+    let found = [...this.knowledgeArticles.values()];
+    if (filter.statuses) found = found.filter((entry) => filter.statuses!.includes(entry.syncStatus));
+    if (filter.folder) found = found.filter((entry) => entry.folder === filter.folder);
+    return found.slice(0, filter.limit ?? 500);
+  }
+
+  async listKnowledgeVersions(
+    articleUrl: string,
+    limit: number,
+  ): Promise<Array<{ contentHash: string; capturedAt: string }>> {
+    return (this.knowledgeVersions.get(articleUrl) ?? []).slice(0, limit);
+  }
+
+  async recordKnowledgeSyncRun(summary: SyncRunSummary): Promise<void> {
+    this.knowledgeRuns.unshift(summary);
+  }
+
+  async latestKnowledgeSyncRun(): Promise<SyncRunSummary | null> {
+    return this.knowledgeRuns[0] ?? null;
   }
 
   async getSetting<T = unknown>(organizationId: string, key: string): Promise<T | null> {

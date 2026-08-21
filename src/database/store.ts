@@ -1,3 +1,9 @@
+import type {
+  ArticleSyncStatus,
+  KnowledgeArticle,
+  KnowledgeFolder,
+  SyncRunSummary,
+} from '../knowledge/types';
 import {
   AutomationApproval,
   AutomationEvent,
@@ -216,6 +222,31 @@ export interface DataStore {
     notes?: string;
   }): Promise<InterfaceProfileRecord>;
   getInterfaceEvidence(profileId: string): Promise<unknown | null>;
+
+  // Help Center knowledge ---------------------------------------------------
+  //
+  // Not scoped to an organization: this is public documentation, the same for
+  // everyone, and it is stored apart from the interface tables above so that
+  // documentation can never be mistaken for a selector.
+  upsertKnowledgeFolders(folders: KnowledgeFolder[]): Promise<number>;
+  listKnowledgeFolders(): Promise<KnowledgeFolder[]>;
+  /**
+   * Stores an article, keeping the previous version when the content changed.
+   * Reports whether it changed, so a sync can say what it actually did.
+   */
+  upsertKnowledgeArticle(article: KnowledgeArticle): Promise<{ changed: boolean; created: boolean }>;
+  getKnowledgeArticle(articleUrl: string): Promise<KnowledgeArticle | null>;
+  listKnowledgeArticles(filter?: {
+    statuses?: ArticleSyncStatus[];
+    folder?: string;
+    limit?: number;
+  }): Promise<KnowledgeArticle[]>;
+  listKnowledgeVersions(
+    articleUrl: string,
+    limit: number,
+  ): Promise<Array<{ contentHash: string; capturedAt: string }>>;
+  recordKnowledgeSyncRun(summary: SyncRunSummary): Promise<void>;
+  latestKnowledgeSyncRun(): Promise<SyncRunSummary | null>;
 
   // Settings ----------------------------------------------------------------
   getSetting<T = unknown>(organizationId: string, key: string): Promise<T | null>;
