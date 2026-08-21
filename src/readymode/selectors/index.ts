@@ -314,23 +314,51 @@ export const LICENSE_CONTROLS = {
  */
 export const TAKEOVER_CONTROLS = {
   continue: control(
-    'takeover.continue',
-    'Continue button on the administrator session notice',
+    'login.continue_existing_session',
+    'Continue button on the "already logged in" notice',
     [
-      {
-        type: 'role',
-        role: 'button',
-        name: /^\s*(?:continue|proceed|take\s?over|continue\s+anyway|yes,?\s*continue)\s*$/i,
-      },
+      // Readymode renders this as a purple control on the login page, and the
+      // element type is not guaranteed: it may be a button, a link styled as
+      // one, or a submit input. Every plausible shape is tried, because
+      // matching only <button> is why the notice was never clicked through.
+      { type: 'role', role: 'button', name: /^\s*continue\s*$/i },
+      { type: 'role', role: 'link', name: /^\s*continue\s*$/i },
       { type: 'css', value: 'input[type="submit"][value="Continue" i]' },
       { type: 'css', value: 'input[type="button"][value="Continue" i]' },
+      { type: 'css', value: 'button:has-text("Continue")' },
+      { type: 'css', value: 'a:has-text("Continue")' },
+      { type: 'text', value: /^\s*continue\s*$/i },
     ],
+    // Absent on every run where the notice does not appear, which is most of
+    // them. Its absence is not a discovery failure.
+    false,
   ),
 } as const;
+
+/**
+ * The notice's own control, named as the brief asks.
+ *
+ * `TAKEOVER_CONTROLS.continue` is the same definition under the name the
+ * takeover module has always used.
+ */
+export const LOGIN_CONTINUE_CONTROL = TAKEOVER_CONTROLS.continue;
+
+/**
+ * Text that identifies the notice this Continue belongs to.
+ *
+ * Required context: a bare "Continue" button somewhere on a page is not this
+ * control, and clicking one because it said Continue is exactly the mistake to
+ * avoid.
+ */
+export const EXISTING_SESSION_CONTEXT = /already (?:logged|signed) ?in/i;
 
 /** Every control, used by the discovery report. */
 export const ALL_CONTROLS: ControlDefinition[] = [
   ...Object.values(LOGIN_CONTROLS),
+  // Part of signing in, not an administrative workflow: it is reported by
+  // discovery but is never gated behind a selector profile, because the account
+  // owner authorized this continuation as part of authentication itself.
+  LOGIN_CONTINUE_CONTROL,
   ...Object.values(AGENT_CONTROLS),
   ...Object.values(STATE_CONTROLS),
   ...Object.values(CAMPAIGN_CONTROLS),

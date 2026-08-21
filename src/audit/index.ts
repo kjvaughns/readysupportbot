@@ -35,6 +35,14 @@ export type AuditEventType =
   | 'browser.session_ended'
   | 'workflow.needs_configuration'
   | 'prompt_injection.blocked'
+  // The authentication path, step by step. Each is recorded so a run that
+  // stops at the existing-session notice can be told from one that never
+  // reached it — which was previously indistinguishable.
+  | 'readymode.credentials_submitted'
+  | 'readymode.existing_session_warning_found'
+  | 'readymode.continue_control_found'
+  | 'readymode.continue_clicked'
+  | 'readymode.authenticated_dashboard_confirmed'
   | 'readymode.session_takeover'
   | 'readymode.interface_discovered'
   | 'readymode.profile_approved'

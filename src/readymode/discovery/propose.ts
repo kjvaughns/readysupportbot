@@ -190,6 +190,25 @@ export const CONTROL_MATCHERS: ControlMatcher[] = [
     postcondition: 'The field accepts input; its value is never read.',
   },
   {
+    /**
+     * The Continue control on Readymode's "already logged in" notice.
+     *
+     * Context is required, not optional. A bare "Continue" somewhere on a page
+     * is not this control, and clicking one because it said Continue is
+     * precisely the mistake to avoid — so the notice's own wording has to be on
+     * screen for the evidence to count.
+     */
+    control: 'login.continue_existing_session',
+    categories: ['button', 'clickable'],
+    exactLabels: ['Continue'],
+    // The notice text, which the collector captures as surrounding context.
+    signals: [/already (?:logged|signed) ?in|log out all your other sessions/i],
+    antiSignals: [/delete|remove|purge|cancel/i],
+    precondition:
+      'Readymode reported that this administrator is already signed in, on the configured domain, with no human verification on screen.',
+    postcondition: 'The Dashboard or License Usage becomes visible.',
+  },
+  {
     control: 'login.submit',
     categories: ['button'],
     signals: [/log\s?in|sign\s?in|submit|enter|go\b/i],

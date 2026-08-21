@@ -79,18 +79,46 @@ const PATTERNS = {
     /read[- ]only|limited (?:admin|access|mode)|view[- ]only|restricted (?:admin|mode)|reduced functionality/i,
 } as const;
 
-/** Wording that means another administrator session will be replaced. */
-const TAKEOVER_SIGNALS: RegExp[] = [
+/**
+ * Wording that can only mean an existing session is about to be replaced.
+ *
+ * Separated from the weaker phrasings below because of where this notice
+ * actually appears. Readymode renders it *on the login page*, with the password
+ * field still in the DOM:
+ *
+ *   "K.Vaughns is already logged in. If you choose to continue, you will log
+ *    out all your other sessions."
+ *
+ * A guard here treated any visible password field as proof that a page was not
+ * a takeover — reasonable in the abstract, and wrong for the one screen it had
+ * to handle. It classified the real notice as `unknown`, so Continue was never
+ * clicked and every run stopped at the login form.
+ *
+ * A strong signal names an existing session being ended. That is not something
+ * a plain login page says, so it stands on its own.
+ */
+const STRONG_TAKEOVER_SIGNALS: RegExp[] = [
   /already (?:logged|signed) ?in/i,
+  /log(?:ged|ging)? out (?:all )?(?:your |the |any )?other session/i,
+  /(?:sign|log)(?:ed|ing)? out (?:of )?(?:all )?(?:your |the )?other (?:session|device|browser)/i,
+  /(?:take|taking) over (?:the |this )?session/i,
+  /disconnect(?:ed)? the other/i,
+  /end the other session/i,
+];
+
+/**
+ * Weaker phrasings. On their own these are suggestive rather than conclusive,
+ * so a page showing them alongside a password field is not acted on.
+ */
+const WEAK_TAKEOVER_SIGNALS: RegExp[] = [
   /active session/i,
   /session (?:is )?in use/i,
   /another (?:session|location|browser|device|user|administrator|admin)/i,
-  /(?:take|taking) over (?:the |this )?session/i,
   /will be (?:signed|logged) out/i,
-  /disconnect(?:ed)? the other/i,
-  /end the other session/i,
   /continue (?:here|anyway)/i,
 ];
+
+const TAKEOVER_SIGNALS: RegExp[] = [...STRONG_TAKEOVER_SIGNALS, ...WEAK_TAKEOVER_SIGNALS];
 
 /**
  * Signals that disqualify a takeover outright. Derived from the same patterns as
@@ -207,8 +235,16 @@ export function classifyInterstitial(snapshot: InterstitialSnapshot): Interstiti
         `The notice mentions another session but also ${blocking.join(', ')}. ReadySupport will not continue.`,
       );
     }
-    if (snapshot.hasPasswordField) {
-      return verdict('unknown', ['password_field'], 'The notice still shows a password field, so it is not a session takeover.');
+    // The notice renders on the login page, so the password field is still
+    // there. It disqualifies only a weak signal: strong wording names an
+    // existing session being ended, which a plain login form never does.
+    const strong = STRONG_TAKEOVER_SIGNALS.some((pattern) => pattern.test(text));
+    if (snapshot.hasPasswordField && !strong) {
+      return verdict(
+        'unknown',
+        ['password_field'],
+        'The notice hints at another session but only shows a login form, so it is not a session takeover.',
+      );
     }
     if (continueButtons.length === 0) {
       return verdict('unknown', ['no_continue_button'], 'The notice mentions another session but has no Continue button.');

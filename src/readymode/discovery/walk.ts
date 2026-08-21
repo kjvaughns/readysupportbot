@@ -15,6 +15,7 @@ import {
   checkAuthentication,
   sameSession,
   sessionDiagnostics,
+  waitForAuthenticated,
 } from '../authState';
 import { ReadymodeSession, ensureAuthenticated, lastAuthenticationTrace } from '../session';
 import { EVIDENCE_CAPS, InterfaceEvidence, PageEvidence } from './evidence';
@@ -244,7 +245,7 @@ export async function discoverInterface(
   // also has, so it confirmed a dashboard that was really a login form and then
   // crawled eleven redirects back to it.
   await gotoRoute(page, DASHBOARD_ROUTE, ['Dashboard'], { timeoutMs: 8000 });
-  const authenticated: AuthenticationCheck = await checkAuthentication(page, 4000);
+  const authenticated: AuthenticationCheck = await waitForAuthenticated(page, 15_000);
 
   record(
     'authenticated_dashboard_confirmed',

@@ -4,7 +4,7 @@ import { logger } from '../security/logger';
 import { sanitizePageValue } from '../security/sanitize';
 import { withoutPersonalData } from '../security/personalData';
 import { HUMAN_VERIFICATION_CONDITIONS, TAKEOVER_CONTROLS } from './selectors';
-import { checkAuthentication } from './authState';
+import { checkAuthentication, waitForAuthenticated } from './authState';
 import { anyPresent, tryDiscover } from './selectors/discovery';
 import { allText, listSearchRoots } from './selectors/frames';
 import {
@@ -149,15 +149,52 @@ export async function handleInterstitial(
     };
   }
 
-  const found = await tryDiscover(page, TAKEOVER_CONTROLS.continue, { timeoutMs: 1500 });
+  await recordEvent({
+    organizationId: session.organizationId,
+    type: 'readymode.existing_session_warning_found',
+    message: 'Readymode reported that this administrator is already signed in elsewhere.',
+    data: { host: snapshot.host, matched: verdict.matched },
+  });
+
+  // Every plausible shape of the control, in order. The notice renders it as a
+  // purple control whose element type is not guaranteed — a button, a link
+  // styled as one, or a submit input — and matching only <button> is why it was
+  // never clicked.
+  let found = await tryDiscover(page, TAKEOVER_CONTROLS.continue, { timeoutMs: 2500 });
+  let usedFirstOfMany = false;
+
+  if (!found.resolved) {
+    // Last resort, and only here. This is authentication, the notice has
+    // already been classified as a genuine takeover on the right host, and the
+    // screen carries one Continue beside one Cancel. Taking the first match is
+    // recorded rather than silent.
+    found = await tryDiscover(page, TAKEOVER_CONTROLS.continue, {
+      timeoutMs: 2500,
+      allowFirstOfMany: true,
+    });
+    usedFirstOfMany = Boolean(found.resolved);
+  }
+
   if (!found.resolved) {
     return {
       classification: 'unknown',
       clicked: false,
       dashboardVerified: false,
-      explanation: 'Exactly one visible Continue button was required, and it could not be identified.',
+      explanation:
+        'Readymode reported an existing session, but no Continue control could be found in any shape.',
     };
   }
+
+  await recordEvent({
+    organizationId: session.organizationId,
+    type: 'readymode.continue_control_found',
+    message: 'The Continue control on the existing-session notice was located.',
+    data: {
+      frame: found.resolved.rootName,
+      strategy: found.resolved.strategy,
+      firstOfMany: usedFirstOfMany,
+    },
+  });
 
   // Burn the attempt before clicking: a click that throws must not be retried.
   attempted.add(session);
@@ -177,6 +214,13 @@ export async function handleInterstitial(
   await found.resolved.locator.click();
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
 
+  await recordEvent({
+    organizationId: session.organizationId,
+    type: 'readymode.continue_clicked',
+    message: 'Continue was pressed on the existing-session notice.',
+    data: { host: snapshot.host },
+  });
+
   // A verification prompt appearing after the click is still never solved.
   if (await anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 1500)) {
     return {
@@ -190,7 +234,18 @@ export async function handleInterstitial(
   // After pressing Continue, the dashboard has to be proved by the signed-in
   // shell. A page still showing the login form never counts, however long it is
   // waited for.
-  const dashboardVerified = (await checkAuthentication(page, 5000)).authenticated;
+  // Signing the other session out and loading the dashboard takes a moment.
+  const confirmation = await waitForAuthenticated(page, 30_000);
+  const dashboardVerified = confirmation.authenticated;
+
+  if (dashboardVerified) {
+    await recordEvent({
+      organizationId: session.organizationId,
+      type: 'readymode.authenticated_dashboard_confirmed',
+      message: `The authenticated interface was confirmed by the ${confirmation.marker}.`,
+      data: { marker: confirmation.marker },
+    });
+  }
 
   return {
     classification: 'admin_session_takeover',

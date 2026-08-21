@@ -79,11 +79,18 @@ export async function checkAuthentication(
   const url = page.url();
   const roots = listSearchRoots(page);
 
+  // Each probe waits for an element that is usually absent — that is the point
+  // of asking — so the per-probe wait is capped. A caller that wants to wait
+  // for a state to arrive polls with `waitForAuthenticated` instead of passing
+  // a long timeout here, which would otherwise be spent proving that a password
+  // field is still missing.
+  const probe = Math.min(timeoutMs, 1200);
+
   let loginFormPresent = false;
   for (const condition of LOGIN_FORM_CONDITIONS) {
     for (const root of roots) {
       try {
-        if ((await countVisible(locatorFor(root, condition), timeoutMs)) > 0) {
+        if ((await countVisible(locatorFor(root, condition), probe)) > 0) {
           loginFormPresent = true;
           break;
         }
@@ -103,7 +110,7 @@ export async function checkAuthentication(
   for (const marker of AUTHENTICATED_MARKERS) {
     for (const root of roots) {
       try {
-        if ((await countVisible(locatorFor(root, marker.strategy), timeoutMs)) > 0) {
+        if ((await countVisible(locatorFor(root, marker.strategy), probe)) > 0) {
           return { authenticated: true, marker: marker.name, loginFormPresent: false, url };
         }
       } catch {
@@ -113,6 +120,27 @@ export async function checkAuthentication(
   }
 
   return { authenticated: false, marker: null, loginFormPresent: false, url };
+}
+
+/**
+ * Waits until the session is authenticated, or the time runs out.
+ *
+ * Polls rather than waiting once with a long timeout: each probe asks about an
+ * element that is usually absent, and a single long wait would be spent proving
+ * absence instead of noticing the moment the shell appears.
+ */
+export async function waitForAuthenticated(
+  page: Page,
+  timeoutMs = 30_000,
+): Promise<AuthenticationCheck> {
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const check = await checkAuthentication(page, 600);
+    if (check.authenticated) return check;
+    if (Date.now() >= deadline) return check;
+    await page.waitForTimeout(500).catch(() => undefined);
+  }
 }
 
 /**

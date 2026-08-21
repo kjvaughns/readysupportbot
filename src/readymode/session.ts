@@ -12,7 +12,12 @@ import {
 import { recordEvent } from '../audit';
 import { getStore } from '../database';
 import { resolveCredentials } from './credentials';
-import { checkAuthentication, waitForLoginOutcome, type LoginOutcome } from './authState';
+import {
+  checkAuthentication,
+  waitForAuthenticated,
+  waitForLoginOutcome,
+  type LoginOutcome,
+} from './authState';
 import { classifyInterstitial } from './interstitial';
 import { captureInterstitial } from './takeover';
 import {
@@ -229,6 +234,12 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   await submit.click();
   trace.submittedCredentials = true;
 
+  await recordEvent({
+    organizationId: session.organizationId,
+    type: 'readymode.credentials_submitted',
+    message: 'The Readymode login form was submitted.',
+  });
+
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
   trace.urlAfterSubmit = page.url();
 
@@ -275,10 +286,17 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
     );
   }
 
-  const confirmed = await checkAuthentication(page, 3000);
+  const confirmed = await waitForAuthenticated(page, 15_000);
   if (confirmed.authenticated) {
     trace.authenticatedMarker = confirmed.marker;
     trace.outcome = 'authenticated';
+
+    await recordEvent({
+      organizationId: session.organizationId,
+      type: 'readymode.authenticated_dashboard_confirmed',
+      message: `The authenticated interface was confirmed by the ${confirmed.marker}.`,
+      data: { marker: confirmed.marker },
+    });
     await markConnected(session.organizationId, credentials.loginUrl, credentials.username);
     return;
   }

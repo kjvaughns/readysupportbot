@@ -128,11 +128,37 @@ describe('takeover preconditions', () => {
     expect(verdict.classification).toBe('unknown');
   });
 
-  it('refuses when a password field is still on the page', () => {
+  it('refuses a weak hint that is really just a login form', () => {
+    // "There may be an active session" beside a password box is a login page,
+    // not a takeover notice.
     const verdict = classifyInterstitial(
-      snapshot({ bodyText: takeoverText, buttons: [CONTINUE], hasPasswordField: true }),
+      snapshot({
+        bodyText: 'There may be an active session. Continue anyway?',
+        buttons: [CONTINUE],
+        hasPasswordField: true,
+      }),
     );
+
     expect(verdict.mayClickContinue).toBe(false);
+    expect(verdict.matched).toContain('password_field');
+  });
+
+  it('continues past the real notice, which renders on the login page', () => {
+    // The rule this replaces treated any visible password field as proof that
+    // a page was not a takeover. Readymode renders this notice *on* the login
+    // page, so that guard classified the real screen as unknown and Continue
+    // was never pressed — every run stopped at the login form.
+    const verdict = classifyInterstitial(
+      snapshot({
+        bodyText:
+          'K.Vaughns is already logged in. If you choose to continue, you will log out all your other sessions.',
+        buttons: [CONTINUE, { label: 'Cancel', visible: true }],
+        hasPasswordField: true,
+      }),
+    );
+
+    expect(verdict.classification).toBe('admin_session_takeover');
+    expect(verdict.mayClickContinue).toBe(true);
   });
 
   it('refuses a Continue button with no takeover wording at all', () => {
