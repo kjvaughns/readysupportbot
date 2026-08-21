@@ -123,6 +123,21 @@ export function sanitizePageValue(value: string, maxLength = 200): string {
     .slice(0, maxLength);
 }
 
+/**
+ * Neutralizes mentions without touching formatting.
+ *
+ * For text ReadySupport composed itself out of documentation: the markdown is
+ * deliberate — headings, numbered steps, links — and escaping it would turn a
+ * readable answer into a wall of backslashes. Mentions still cannot survive,
+ * because an article that happened to contain "@everyone" must never ping a
+ * server.
+ */
+export function neutralizeMentions(value: string): string {
+  return String(value ?? '')
+    .replace(/@(everyone|here)/gi, '@\u200B$1')
+    .replace(/<@[!&]?\d+>/g, '@user');
+}
+
 /** Neutralizes Discord mentions and markdown so bot replies cannot be weaponized. */
 export function escapeDiscord(value: string): string {
   return String(value ?? '')

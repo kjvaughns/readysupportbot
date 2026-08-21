@@ -5,6 +5,7 @@ import { Action, actionSchema } from '../openai/schema';
 import { isModifyingAction } from '../permissions';
 import { getActionRoles, checkActionAccess } from '../permissions/overrides';
 import { answerTroubleshooting } from '../knowledge/troubleshooting';
+import { composeAnswer, retrieve } from '../knowledge/retrieval';
 import { approvalRequirement, awaitingSinceFrom, submitApproval } from '../approvals';
 import { assertTransition } from '../queue';
 import {
@@ -23,10 +24,12 @@ import {
 } from '../security/errors';
 import { dedupeKey } from '../security/ids';
 import { logger } from '../security/logger';
-import { escapeDiscord } from '../security/sanitize';
+import { escapeDiscord, neutralizeMentions } from '../security/sanitize';
 import { notifyAuthenticationRequired, notifySecondApprovalNeeded } from '../notifications';
 import { recentActivity, describeEvent } from '../audit';
 import { ResolvedDiscordContext } from './context';
+import { classifyRequest } from './classification';
+import { buildPlan } from './plan';
 import {
   confirmationButtons,
   confirmationMessage,
@@ -80,10 +83,7 @@ export async function handleAction(input: {
     return { content: access.reason };
   }
 
-  if (action.action === 'TROUBLESHOOT') {
-    const answer = answerTroubleshooting(action.topic, action.question);
-    return { content: escapeDiscord(answer.body).slice(0, 1900) };
-  }
+  if (action.action === 'TROUBLESHOOT') return troubleshootReply(context, action);
 
   if (action.action === 'CONNECTION_STATUS') return connectionStatusReply(context);
   if (action.action === 'RECENT_ACTIONS') return recentActionsReply(context, action.limit);
@@ -164,6 +164,17 @@ export async function handleAction(input: {
 
   const requirement = approvalRequirement(action);
 
+  // The plan an approver reads: what was understood, what would change, whose
+  // account it touches, which controls it would use and where each came from,
+  // what approval is needed, and what success would have to look like.
+  const plan = buildPlan({
+    action,
+    classification: classifyRequest({ action }),
+    preview,
+    needsSecondApprover: requirement.required === 2,
+    dryRun: config.dryRun,
+  });
+
   await recordEvent({
     organizationId: context.organizationId,
     requestId: request.id,
@@ -178,10 +189,65 @@ export async function handleAction(input: {
       preview,
       needsSecondApprover: requirement.required === 2,
       dryRun: config.dryRun,
+      plan,
     }),
     components: [confirmationButtons(request.id)],
     requestId: request.id,
     reference: request.reference,
+  };
+}
+
+/**
+ * Answers a support question.
+ *
+ * The official documentation comes first, cited. Only when nothing relevant has
+ * actually been read does the general checklist appear — and it says plainly
+ * that it is general, because steps that name the wrong menu waste more of an
+ * agent's time than no steps at all.
+ */
+async function troubleshootReply(
+  context: ResolvedDiscordContext,
+  action: Extract<Action, { action: 'TROUBLESHOOT' }>,
+): Promise<FlowReply> {
+  const question = action.question?.trim() || action.topic;
+
+  // Starter and iQ describe different screens, so the organization's own
+  // interface decides which article is preferred.
+  let product: string | null = null;
+  try {
+    const profile = await getStore().getActiveInterfaceProfile(context.organizationId);
+    if (profile?.interfaceVersion === 'iq') product = 'Readymode iQ';
+    else if (profile?.interfaceVersion === 'starter') product = 'Readymode Starter';
+  } catch (error) {
+    logger.debug({ err: error }, 'Could not read the interface profile for a support answer');
+  }
+
+  let answer;
+  try {
+    answer = composeAnswer(question, await retrieve(question, { product }));
+  } catch (error) {
+    logger.warn({ err: error }, 'Knowledge retrieval failed; falling back to general guidance');
+    answer = null;
+  }
+
+  if (answer && !answer.unanswered) {
+    const lines = [neutralizeMentions(answer.text)];
+    if (answer.citations.length > 0) {
+      lines.push('');
+      lines.push(`Source: ${answer.citations.join(' · ')}`);
+    }
+    return { content: lines.join('\n').slice(0, 1900) };
+  }
+
+  const general = answerTroubleshooting(action.topic, action.question);
+  return {
+    content: [
+      'The official Readymode documentation ReadySupport has read does not cover that, so this is general guidance rather than Readymode\'s own steps:',
+      '',
+      escapeDiscord(general.body),
+    ]
+      .join('\n')
+      .slice(0, 1900),
   };
 }
 

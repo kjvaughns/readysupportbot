@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { sanitizePageValue } from '../security/sanitize';
 import { KnowledgeArticle } from './types';
 import { contentHash } from './bank';
 
@@ -70,8 +71,14 @@ export class ArticleParseError extends Error {
   }
 }
 
-function clean(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+/**
+ * Article text is fetched from an external site, so it is treated as untrusted
+ * even though the site is the official one. Control and zero-width characters
+ * are stripped before the text is stored, because it later reaches Discord and
+ * model prompts.
+ */
+function clean(value: string, maxLength = 2000): string {
+  return sanitizePageValue(value, maxLength);
 }
 
 /**

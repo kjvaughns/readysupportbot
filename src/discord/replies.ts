@@ -10,6 +10,8 @@ import { escapeDiscord } from '../security/sanitize';
 import { formatStates } from '../readymode/states';
 
 /** Button ids carry the request they belong to. */
+import { PlanCard, renderPlan } from './plan';
+
 export const BUTTON_PREFIX = 'rs';
 
 export function confirmationButtons(requestId: string): ActionRowBuilder<ButtonBuilder> {
@@ -44,7 +46,18 @@ export function confirmationMessage(input: {
   preview: ChangePreview;
   needsSecondApprover: boolean;
   dryRun: boolean;
+  /**
+   * The full plan: what was understood, what would change, whose account, which
+   * controls, what approval, and what success would look like. Shown in place
+   * of the short summary when it is available, because somebody about to
+   * approve a change should be able to see which selectors it will act on.
+   */
+  plan?: PlanCard;
 }): string {
+  if (input.plan) {
+    return [renderPlan(input.plan), '', 'Confirm  ·  Edit  ·  Cancel'].join('\n');
+  }
+
   const heading = isStateAction(input.action)
     ? 'ReadySupport is ready to update your states.'
     : `ReadySupport is ready to ${describeAction(input.action).toLowerCase()}.`;
