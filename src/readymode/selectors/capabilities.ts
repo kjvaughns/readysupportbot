@@ -67,6 +67,15 @@ export interface CapabilityDefinition {
   anyOfControls?: string[][];
   allowBuiltin: boolean;
   actionTypes: ActionType[];
+  /**
+   * The screen these controls live on.
+   *
+   * Verification has to happen where the controls are. Checking for a "Sign Out"
+   * button while the session sits on the dashboard finds nothing and concludes
+   * the capability is unusable — which is true of the dashboard and says
+   * nothing about License Usage.
+   */
+  panel?: 'users' | 'licenses' | 'leads' | 'queues' | 'campaigns';
 }
 
 export const CAPABILITIES: CapabilityDefinition[] = [
@@ -85,6 +94,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.search'],
     allowBuiltin: true,
     actionTypes: [],
+    panel: 'users',
   },
   {
     id: 'agent_results',
@@ -92,6 +102,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.rows'],
     allowBuiltin: true,
     actionTypes: ['AGENT_STATUS', 'LICENSE_USAGE'],
+    panel: 'users',
   },
   {
     id: 'create_account',
@@ -99,6 +110,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.create', 'agents.save'],
     allowBuiltin: false,
     actionTypes: ['CREATE_ACCOUNT', 'CREATE_ACCOUNTS'],
+    panel: 'users',
   },
   {
     id: 'clear_license',
@@ -106,6 +118,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.clear_license'],
     allowBuiltin: false,
     actionTypes: ['CLEAR_LICENSE'],
+    panel: 'licenses',
   },
   {
     id: 'password_reset',
@@ -113,6 +126,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.reset_password'],
     allowBuiltin: false,
     actionTypes: ['RESET_PASSWORD'],
+    panel: 'users',
   },
   {
     id: 'deactivate',
@@ -120,6 +134,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.deactivate'],
     allowBuiltin: false,
     actionTypes: ['DEACTIVATE_ACCOUNT'],
+    panel: 'users',
   },
   {
     id: 'states',
@@ -156,6 +171,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['users.log_out_inactive'],
     allowBuiltin: false,
     actionTypes: ['CLEAR_ALL_LICENSES'],
+    panel: 'licenses',
   },
   {
     id: 'force_logout',
@@ -163,6 +179,7 @@ export const CAPABILITIES: CapabilityDefinition[] = [
     requiredControls: ['agents.force_logout'],
     allowBuiltin: false,
     actionTypes: ['FORCE_LOGOUT'],
+    panel: 'licenses',
   },
   {
     id: 'save',

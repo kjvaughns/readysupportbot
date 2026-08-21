@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { logger } from '../security/logger';
 import { getStore } from '../database';
 import { recordEvent } from '../audit';
 import { jobQueue, laneKey } from '../queue';
@@ -17,6 +18,7 @@ import { ReadymodeSession, withSession } from './session';
 import { ALL_CONTROLS } from './selectors';
 import { discoveryReport } from './selectors/discovery';
 import { capabilityForAction } from './selectors/capabilities';
+import { openPanel } from './navigation';
 import { WorkflowContext } from './workflows/harness';
 import { listAgents, openAgent, readAssignedStates } from './workflows/pageOperations';
 import {
@@ -195,6 +197,20 @@ async function assertCapabilityVerified(
   ]);
   const controls = ALL_CONTROLS.filter((control) => involved.has(control.name));
   if (controls.length === 0) return;
+
+  // Look where the controls actually are. Checking for a per-row "Sign Out"
+  // while the session sits on the dashboard finds nothing and would conclude
+  // the capability is unusable — which is true of the dashboard and says
+  // nothing about License Usage. Opening a screen changes nothing.
+  if (capability.panel) {
+    const opened = await openPanel(session.page, capability.panel);
+    if (!opened.opened) {
+      logger.warn(
+        { capability: capability.id, panel: capability.panel, reason: opened.reason },
+        'Could not open the screen a capability lives on before verifying it',
+      );
+    }
+  }
 
   const report = await discoveryReport(session.page, controls, { timeoutMs: 600 });
   const status = report.capabilities.find((entry) => entry.capability === capability.id);

@@ -85,6 +85,59 @@ describe('capability rollup', () => {
   });
 });
 
+describe('where a capability is verified', () => {
+  it('names the screen its controls live on', () => {
+    // Checking for a per-row "Sign Out" while the session sits on the dashboard
+    // finds nothing and would conclude the capability is unusable — which is
+    // true of the dashboard and says nothing about License Usage.
+    const byId = new Map(CAPABILITIES.map((capability) => [capability.id, capability]));
+
+    expect(byId.get('force_logout')?.panel).toBe('licenses');
+    expect(byId.get('bulk_license_clear')?.panel).toBe('licenses');
+    expect(byId.get('create_account')?.panel).toBe('users');
+    expect(byId.get('agent_search')?.panel).toBe('users');
+  });
+
+  it('leaves the screen unset where the controls are on a record, not a screen', () => {
+    const byId = new Map(CAPABILITIES.map((capability) => [capability.id, capability]));
+    // States, campaigns and queues are assigned on an individual agent's
+    // record, which the workflow opens by matching the person.
+    expect(byId.get('states')?.panel).toBeUndefined();
+    expect(byId.get('campaigns')?.panel).toBeUndefined();
+  });
+});
+
+describe('evidence is not authorization', () => {
+  it('refuses a change resolved only from the recorded inspection', () => {
+    const [capability] = capabilityStatuses([
+      status({ control: 'agents.force_logout', source: 'interface_map' }),
+    ]).filter((entry) => entry.capability === 'force_logout');
+
+    // The inspection is a good claim about the interface. It is not somebody
+    // with authority saying to act on this account.
+    expect(capability.usable).toBe(false);
+    expect(capability.blockedReason).toMatch(/no Owner has approved/i);
+  });
+
+  it('refuses a change resolved only from the committed file', () => {
+    const [capability] = capabilityStatuses([
+      status({ control: 'agents.force_logout', source: 'observed_file' }),
+    ]).filter((entry) => entry.capability === 'force_logout');
+
+    expect(capability.usable).toBe(false);
+  });
+
+  it('allows a read on any source that found the control', () => {
+    for (const source of ['interface_map', 'observed_file', 'builtin'] as const) {
+      const [capability] = capabilityStatuses([
+        status({ control: 'agents.rows', source }),
+      ]).filter((entry) => entry.capability === 'agent_results');
+
+      expect(capability.usable, source).toBe(true);
+    }
+  });
+});
+
 describe('action to capability mapping', () => {
   it('gates every modifying action that drives a browser behind a capability', () => {
     // SET_DEFAULT_STATES is stored in the database and never touches Readymode.
