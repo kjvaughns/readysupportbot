@@ -1,3 +1,12 @@
+/* eslint-disable no-console -- Deliberate, temporary deployment diagnostics.
+ *
+ * These go to stdout rather than through the structured logger so they are
+ * visible in a platform's raw log tail with no log level and no JSON viewer.
+ * They exist to settle one question — is the deployed build running the current
+ * authentication code — and none of them prints a credential, a cookie, a
+ * token, a name, or any page content. Remove them once the deployment is
+ * confirmed and `AUTH_FLOW_VERSION` has served its purpose.
+ */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Browserbase from '@browserbasehq/sdk';
@@ -12,6 +21,7 @@ import {
 import { recordEvent } from '../audit';
 import { getStore } from '../database';
 import { resolveCredentials } from './credentials';
+import { AUTH_FLOW_VERSION, buildInfo } from '../buildInfo';
 import {
   checkAuthentication,
   waitForAuthenticated,
@@ -196,6 +206,12 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
 
   const expectedHost = hostOf(credentials.loginUrl);
 
+  // Deliberately console.log and not the structured logger: these have to be
+  // visible in a platform's log tail with no log level and no JSON viewer, so
+  // that "the deploy did not happen" can be told apart from "the fix failed".
+  // Nothing here prints a credential, a cookie, a token, a name or page text.
+  console.log(`[Readymode Auth] version=${AUTH_FLOW_VERSION} commit=${buildInfo().commitShort}`);
+
   await page.goto(credentials.loginUrl, { waitUntil: 'domcontentloaded' });
 
   // Already signed in? Only when a real authenticated marker is on screen AND
@@ -234,6 +250,8 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   await submit.click();
   trace.submittedCredentials = true;
 
+  console.log('[Readymode Auth] login submitted');
+
   await recordEvent({
     organizationId: session.organizationId,
     type: 'readymode.credentials_submitted',
@@ -246,6 +264,8 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   // One of five outcomes, all named. A login that neither succeeded nor
   // visibly failed is a real state, and treating it as success is how a run
   // ends up crawling a login page.
+  console.log('[Readymode Auth] checking for existing session warning');
+
   const outcome = await waitForLoginOutcome(page, {
     humanVerification: () => anyPresent(page, HUMAN_VERIFICATION_CONDITIONS, 400),
     sessionWarning: async () => {
@@ -261,6 +281,8 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
 
   trace.outcome = outcome.outcome;
   trace.authenticatedMarker = outcome.marker;
+
+  console.log(`[Readymode Auth] login outcome=${outcome.outcome}`);
 
   if (outcome.outcome === 'human_verification') {
     await markAuthenticationRequired(
@@ -290,6 +312,8 @@ export async function ensureAuthenticated(session: ReadymodeSession): Promise<vo
   if (confirmed.authenticated) {
     trace.authenticatedMarker = confirmed.marker;
     trace.outcome = 'authenticated';
+
+    console.log(`[Readymode Auth] dashboard confirmed marker=${confirmed.marker}`);
 
     await recordEvent({
       organizationId: session.organizationId,

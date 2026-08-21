@@ -1,3 +1,12 @@
+/* eslint-disable no-console -- Deliberate, temporary deployment diagnostics.
+ *
+ * These go to stdout rather than through the structured logger so they are
+ * visible in a platform's raw log tail with no log level and no JSON viewer.
+ * They exist to settle one question — is the deployed build running the current
+ * authentication code — and none of them prints a credential, a cookie, a
+ * token, a name, or any page content. Remove them once the deployment is
+ * confirmed and `AUTH_FLOW_VERSION` has served its purpose.
+ */
 import type { Page } from 'playwright-core';
 import { recordEvent } from '../audit';
 import { logger } from '../security/logger';
@@ -160,6 +169,24 @@ export async function handleInterstitial(
   // purple control whose element type is not guaranteed — a button, a link
   // styled as one, or a submit input — and matching only <button> is why it was
   // never clicked.
+  console.log('[Readymode Auth] existing_session_warning_found');
+
+  // Counted with a plain locator before any registry lookup, so the number is
+  // reported even when the registry fails to resolve the control. A zero here
+  // and a zero after are different problems: nothing on the page, versus
+  // something on the page that the registry could not identify.
+  const rawCandidates = page.locator(
+    'button:has-text("Continue"), a:has-text("Continue"), input[type="submit"][value="Continue" i], input[type="button"][value="Continue" i], [role="button"]:has-text("Continue")',
+  );
+  const rawCount = await rawCandidates.count().catch(() => 0);
+  const rawVisible = await rawCandidates
+    .first()
+    .isVisible()
+    .catch(() => false);
+
+  console.log('[Readymode Auth] continue candidates', rawCount);
+  console.log('[Readymode Auth] continue visible', rawVisible);
+
   let found = await tryDiscover(page, TAKEOVER_CONTROLS.continue, { timeoutMs: 2500 });
   let usedFirstOfMany = false;
 
@@ -176,6 +203,10 @@ export async function handleInterstitial(
   }
 
   if (!found.resolved) {
+    console.log(
+      `[Readymode Auth] continue NOT resolved despite ${rawCount} raw candidate(s) — refusing to click`,
+    );
+
     return {
       classification: 'unknown',
       clicked: false,
@@ -184,6 +215,10 @@ export async function handleInterstitial(
         'Readymode reported an existing session, but no Continue control could be found in any shape.',
     };
   }
+
+  console.log(
+    `[Readymode Auth] continue control found strategy=${found.resolved.strategy} firstOfMany=${usedFirstOfMany}`,
+  );
 
   await recordEvent({
     organizationId: session.organizationId,
@@ -214,6 +249,8 @@ export async function handleInterstitial(
   await found.resolved.locator.click();
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
 
+  console.log('[Readymode Auth] continue clicked');
+
   await recordEvent({
     organizationId: session.organizationId,
     type: 'readymode.continue_clicked',
@@ -237,6 +274,8 @@ export async function handleInterstitial(
   // Signing the other session out and loading the dashboard takes a moment.
   const confirmation = await waitForAuthenticated(page, 30_000);
   const dashboardVerified = confirmation.authenticated;
+
+  console.log(`[Readymode Auth] dashboard confirmed=${dashboardVerified} marker=${confirmation.marker ?? 'none'}`);
 
   if (dashboardVerified) {
     await recordEvent({

@@ -1,3 +1,4 @@
+import { buildInfo } from '../buildInfo';
 import { DEPENDENCIES, dependencyConfiguration, DependencyName, isSetupMode } from '../config';
 import { checkDiscord } from '../discord/client';
 import { checkSupabase } from '../database';
@@ -31,8 +32,19 @@ export interface ReadinessReport {
   queue: ReturnType<typeof jobQueue.snapshot>;
 }
 
-export function liveness(): { status: 'ok'; uptimeSeconds: number; setupMode: boolean } {
+export function liveness(): {
+  status: 'ok';
+  uptimeSeconds: number;
+  setupMode: boolean;
+  authFlowVersion: string;
+  commitSha: string;
+  commitShort: string;
+  startedAt: string;
+} {
   return {
+    // Which build is answering. A fix that is deployed and a fix that is not
+    // look identical from the outside without this.
+    ...buildInfo(),
     status: 'ok',
     uptimeSeconds: Math.round(process.uptime()),
     setupMode: isSetupMode(),

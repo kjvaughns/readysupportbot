@@ -17,6 +17,8 @@ import { discoveryReport } from '../../readymode/selectors/discovery';
 import { locationLabel } from '../../readymode/selectors/frames';
 import { bindProfile, invalidateProfileCache, loadProfile } from '../../readymode/selectors/resolve';
 import { runDiscovery } from '../../readymode/discovery';
+import { runAuthProbe } from '../../readymode/authProbe';
+import { buildInfo } from '../../buildInfo';
 import { REQUIRED_NAVIGATION_CONTROLS } from '../../readymode/discovery/readiness';
 import {
   BLOCKED_AREAS,
@@ -222,6 +224,9 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
 
       return {
         ok: true,
+        // Which build answered. Without this, a fix that was never deployed and
+        // a fix that does not work are indistinguishable from out here.
+        ...buildInfo(),
         profile: {
           id: result.profile.id,
           status: result.profile.status,
@@ -364,6 +369,63 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
         ]
           .filter(Boolean)
           .join(' '),
+      };
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  });
+
+  /**
+   * Which build is answering.
+   *
+   * Unauthenticated and free of side effects: it exists to be called before
+   * anything else, so "which backend is this" is settled by the backend itself
+   * rather than inferred from behaviour. It returns only a version string and a
+   * commit — nothing about the account, the connection or the data.
+   */
+  app.get('/readymode/auth-version', async () => buildInfo());
+
+  /**
+   * Prove what this build does at the login screen, and nothing else.
+   *
+   * Signs in, looks for Continue with a plain locator that consults no stored
+   * selector, presses it, and reports what the screen became. It runs no
+   * discovery and creates no profile, so it can be used to settle "is the new
+   * authentication code actually running" without any other moving part.
+   */
+  app.post('/readymode/auth-probe', async (request) => {
+    const context = await requireRole(request, ['owner']);
+
+    const session = await openSession(context.organizationId).catch(() => null);
+    if (!session) {
+      return {
+        ok: false,
+        ...buildInfo(),
+        message: 'A browser session could not be started. Check the Browserbase configuration.',
+      };
+    }
+
+    try {
+      const probe = await runAuthProbe(session);
+
+      await recordEvent({
+        organizationId: context.organizationId,
+        type: 'connection.tested',
+        message:
+          `Authentication probe: ${probe.candidateCount} Continue candidate(s), ` +
+          `outcome=${probe.outcome}, authenticated=${probe.authenticated}.`,
+        data: {
+          authFlowVersion: probe.authFlowVersion,
+          commitShort: probe.commitShort,
+          loginOutcome: probe.loginOutcome,
+        },
+      });
+
+      return {
+        ok: true,
+        ...probe,
+        // The outcome is the answer. The sentence just reads it back.
+        message: probe.explanation,
       };
     } finally {
       await session.close().catch(() => undefined);

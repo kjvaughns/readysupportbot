@@ -1,3 +1,4 @@
+import { announceBuild } from './buildInfo';
 import { config, dependencyConfiguration, isSetupMode } from './config';
 import { logger } from './security/logger';
 import { startServer } from './api/server';
@@ -13,6 +14,8 @@ import { jobQueue } from './queue';
  * never stop the process.
  */
 async function main(): Promise<void> {
+  announceBuild();
+
   const app = await startServer();
 
   const configuration = dependencyConfiguration();
