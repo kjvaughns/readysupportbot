@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { logger } from '../security/logger';
 import {
   KnowledgeArticle,
   KnowledgeBankFile,
@@ -24,10 +25,33 @@ const BANK_PATH = join(__dirname, '..', '..', 'data', 'readysupport_knowledge_ba
 
 let cached: KnowledgeBankFile | null = null;
 
+/**
+ * Reads the bank from disk.
+ *
+ * A missing file is reported and treated as an empty bank rather than thrown.
+ * The service should start and say it has no documentation, not fail to start —
+ * every other capability is independent of this one, and a deployment that
+ * forgot to ship `data/` should be diagnosable from `/api/readymode/capabilities`
+ * rather than from a crash loop.
+ */
 export function loadKnowledgeBank(path = BANK_PATH): KnowledgeBankFile {
   if (cached) return cached;
-  const raw = JSON.parse(readFileSync(path, 'utf8'));
-  cached = knowledgeBankSchema.parse(raw);
+
+  try {
+    cached = knowledgeBankSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  } catch (error) {
+    logger.error(
+      { path, err: error instanceof Error ? error.message : 'unreadable' },
+      'The Help Center knowledge bank could not be read; ReadySupport has no documentation loaded',
+    );
+    cached = knowledgeBankSchema.parse({
+      schema_version: '0',
+      generated_at: new Date(0).toISOString(),
+      source_home: 'https://help.readymode.com/support/home',
+      source_index: 'https://help.readymode.com/support/solutions',
+    });
+  }
+
   return cached;
 }
 

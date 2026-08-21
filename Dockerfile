@@ -28,6 +28,10 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 COPY supabase ./supabase
+# The recorded interface inspection and the Help Center bank. The knowledge
+# loader reads these at run time, so an image without them starts with no
+# documentation at all.
+COPY data ./data
 
 # Railway injects PORT at runtime; EXPOSE is documentation only.
 EXPOSE 8080

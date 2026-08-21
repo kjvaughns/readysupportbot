@@ -251,9 +251,34 @@ npm run knowledge:seed   # no network; stores the supplied bank
 npm run knowledge:sync   # fetches and parses the real Help Center articles
 ```
 
-On Railway, run these from the service shell, or add a cron service that runs
-`npm run knowledge:sync` daily. `KNOWLEDGE_MAX_ARTICLES` bounds one run (default
-200) so a first sync can be a small one.
+The npm scripts need `tsx`, which the production image does not carry, so on
+Railway use the endpoint instead — the same reasoning as slash command
+registration, which is also exposed for deployments with no shell:
+
+```bash
+# Seed only: stores the supplied bank, no network.
+curl -X POST https://<app>/api/knowledge/sync \
+  -H "Authorization: Bearer <owner token>" \
+  -H "X-Organization-Id: <organization id>" \
+  -H "Content-Type: application/json" \
+  -d '{"seedOnly": true}'
+
+# Seed and fetch. Bounded per call; re-running is cheap.
+curl -X POST https://<app>/api/knowledge/sync \
+  -H "Authorization: Bearer <owner token>" \
+  -H "X-Organization-Id: <organization id>" \
+  -H "Content-Type: application/json" \
+  -d '{"maxArticles": 60}'
+
+# What has actually been read.
+curl https://<app>/api/knowledge/status \
+  -H "Authorization: Bearer <owner token>" \
+  -H "X-Organization-Id: <organization id>"
+```
+
+Call the second one repeatedly until `status` reports `succeeded`; each call
+picks up where the last left off, and an unchanged article costs a 304.
+`KNOWLEDGE_MAX_ARTICLES` bounds the npm script the same way (default 200).
 
 The sync is polite by construction: one request at a time, a second between
 them, conditional requests so an unchanged article costs a 304, and a hard

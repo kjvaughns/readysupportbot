@@ -7,6 +7,7 @@ import { newRequestId } from '../security/ids';
 import { AppError, statusCodeFor, toSafeMessage } from '../security/errors';
 import { healthRoutes } from './routes/health';
 import { discordRoutes } from './routes/discord';
+import { knowledgeRoutes } from './routes/knowledge';
 import { readymodeRoutes } from './routes/readymode';
 import { workspaceRoutes } from './routes/workspace';
 
@@ -104,6 +105,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(discordRoutes, { prefix: '/api' });
   await app.register(readymodeRoutes, { prefix: '/api' });
+  await app.register(knowledgeRoutes, { prefix: '/api' });
   await app.register(workspaceRoutes, { prefix: '/api' });
 
   return app;
