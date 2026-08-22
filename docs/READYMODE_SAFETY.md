@@ -79,6 +79,20 @@ content is neutralized and recorded before it reaches the language model. The
 model fills in a closed action schema and nothing else — it never selects a page,
 a selector, or a browser step.
 
+## Administrative controls during discovery
+
+Discovery navigates and reads. It does not click Create, Save, Update, Delete,
+Reset Password, Clear License, Deactivate, Logout, assignment controls, or
+anything else that changes state.
+
+This is enforced twice on the same click. `isApprovedPanelLabel` is an exact
+allowlist of the eleven panel labels the walk may open; `assertNotAdministrative`
+then **throws** on any label carrying a state-changing verb. The second check
+exists because the first can be extended by someone who has not read the second,
+and it throws rather than returning false because every click site wraps its work
+in `.catch(() => undefined)` — a refusal that returned false would be swallowed
+by the code it protects.
+
 ## Personal data
 
 Discovery reads real pages containing real people's data. It keeps the shape of

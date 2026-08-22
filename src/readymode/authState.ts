@@ -286,3 +286,160 @@ export function sameSession(a: SessionDiagnostics, b: SessionDiagnostics): boole
     a.pageIndex === b.pageIndex
   );
 }
+
+
+/**
+ * Waiting for Readymode to settle after Continue.
+ *
+ * `networkidle` alone is the wrong instrument here: Readymode holds background
+ * connections open, so idle may never arrive and the wait becomes the whole
+ * budget. Three signals are watched instead, and the first that fires wins —
+ * the address changing, the document being replaced, or the network going quiet
+ * if it happens to.
+ */
+export interface SettleResult {
+  settled: boolean;
+  by: 'url-change' | 'dom-change' | 'network-idle' | 'timeout';
+  /** Path only: a query string can carry a token. */
+  path: string;
+  durationMs: number;
+}
+
+export async function settleAfterNavigation(
+  page: Page,
+  options: { timeoutMs?: number; previousUrl?: string } = {},
+): Promise<SettleResult> {
+  const timeoutMs = options.timeoutMs ?? 8000;
+  const started = Date.now();
+  const before = options.previousUrl ?? page.url();
+
+  const path = (url: string): string => {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return url.slice(0, 120);
+    }
+  };
+
+  const urlChanged = (async () => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (page.url() !== before) return 'url-change' as const;
+      await page.waitForTimeout(150).catch(() => undefined);
+    }
+    return null;
+  })();
+
+  const domReplaced = page
+    .waitForLoadState('domcontentloaded', { timeout: timeoutMs })
+    .then(() => 'dom-change' as const)
+    .catch(() => null);
+
+  // Watched, never depended on: it may simply never happen.
+  const networkQuiet = page
+    .waitForLoadState('networkidle', { timeout: timeoutMs })
+    .then(() => 'network-idle' as const)
+    .catch(() => null);
+
+  const first = await Promise.race([
+    urlChanged,
+    domReplaced,
+    networkQuiet,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+
+  return {
+    settled: first !== null,
+    by: first ?? 'timeout',
+    path: path(page.url()),
+    durationMs: Date.now() - started,
+  };
+}
+
+/**
+ * Whether the session is authenticated, decided on four independent signals.
+ *
+ * One hardcoded dashboard selector is a single point of failure, and it failed:
+ * a marker that does not render on a given account reads as "not signed in" for
+ * every screen thereafter. These four disagree in useful ways — the first two
+ * say what the page is *not*, the last two say what it *is* — and which passed
+ * is reported so a wrong answer can be diagnosed instead of guessed at.
+ */
+export interface AuthenticationSignals {
+  loginFormAbsent: boolean;
+  existingSessionNoticeAbsent: boolean;
+  urlIsNotLogin: boolean;
+  authenticatedMarkerPresent: boolean;
+  /** The marker that fired, when one did. */
+  marker: string | null;
+  /** Passed signal names, for the report. */
+  passed: string[];
+  failed: string[];
+  authenticated: boolean;
+  path: string;
+}
+
+export async function confirmAuthenticated(
+  page: Page,
+  options: { loginUrl?: string; timeoutMs?: number } = {},
+): Promise<AuthenticationSignals> {
+  const check = await checkAuthentication(page, options.timeoutMs ?? 1200);
+
+  const loginPath = (() => {
+    try {
+      return options.loginUrl ? new URL(options.loginUrl).pathname : '/login_new/';
+    } catch {
+      return '/login_new/';
+    }
+  })();
+
+  const currentPath = (() => {
+    try {
+      return new URL(page.url()).pathname;
+    } catch {
+      return '';
+    }
+  })();
+
+  const noticeAbsent = !(await page
+    .locator('input[type="submit"][value="Continue" i]')
+    .first()
+    .isVisible()
+    .catch(() => false));
+
+  const signals: AuthenticationSignals = {
+    loginFormAbsent: !check.loginFormPresent,
+    existingSessionNoticeAbsent: noticeAbsent,
+    urlIsNotLogin: currentPath !== loginPath,
+    authenticatedMarkerPresent: check.authenticated,
+    marker: check.marker,
+    passed: [],
+    failed: [],
+    authenticated: false,
+    path: currentPath,
+  };
+
+  for (const [name, passed] of [
+    ['loginFormAbsent', signals.loginFormAbsent],
+    ['existingSessionNoticeAbsent', signals.existingSessionNoticeAbsent],
+    ['urlIsNotLogin', signals.urlIsNotLogin],
+    ['authenticatedMarkerPresent', signals.authenticatedMarkerPresent],
+  ] as Array<[string, boolean]>) {
+    (passed ? signals.passed : signals.failed).push(name);
+  }
+
+  /**
+   * The rule: the page must not be the login form, and something must say it is
+   * the interface.
+   *
+   * A marker is the strongest of those, but the URL having moved off the login
+   * path, with no login form and no notice on screen, is enough on its own —
+   * which keeps one unrendered marker from failing an otherwise good session.
+   */
+  signals.authenticated =
+    signals.loginFormAbsent &&
+    signals.existingSessionNoticeAbsent &&
+    (signals.authenticatedMarkerPresent || signals.urlIsNotLogin);
+
+  return signals;
+}

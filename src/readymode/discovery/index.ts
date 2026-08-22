@@ -11,6 +11,8 @@ import { InterfaceEvidence, rootStats } from './evidence';
 import { PanelVisit, discoverInterface } from './walk';
 import { DiscoveryState, StageResult, WorkflowProbeResult } from './stages';
 import { ReadinessAssessment, assessReadiness, controlsWithoutMatchers } from './readiness';
+import { WorkflowReport } from './trace';
+import { AuthenticationSignals } from '../authState';
 import { CONTROL_MATCHERS, ProposedSelector, proposeSelectors, promotable } from './propose';
 import { AppError } from '../../security/errors';
 
@@ -31,6 +33,21 @@ export { inspectCurrentPage, buildEvidence } from './inspector';
 
 export interface DiscoveryRunResult {
   profile: InterfaceProfileWithSelectors;
+  /**
+   * The run as a finite-state workflow: every transition timestamped, the
+   * operation that was in flight if it stopped badly, and the screen counts.
+   *
+   * This is the answer to "where did it stop", which a platform timeout can
+   * never give.
+   */
+  workflow: WorkflowReport;
+  /** Which of the four authentication signals passed, and which did not. */
+  authenticationSignals: AuthenticationSignals | null;
+  mode: 'reduced' | 'full';
+  /** True when the run finished inside its own budget. */
+  withinBudget: boolean;
+  /** Whether a profile was written, which happens even when screens failed. */
+  profileSaved: boolean;
   visited: string[];
   skipped: Array<{ label: string; reason: string }>;
   /** Every screen the walk tried, with the heading it expected and the one it got. */
@@ -50,6 +67,9 @@ export interface DiscoveryRunResult {
     framesInspected: number;
     screensConfirmed: number;
     screensAttempted: number;
+    screensSkipped: number;
+    screensFailed: number;
+    durationMs: number;
   };
   session: { atLogin: unknown; atCrawl: unknown; same: boolean };
   authentication: {
@@ -105,11 +125,21 @@ export async function runDiscovery(input: {
   organizationId: string;
   discoveredBy: string | null;
   maxStops?: number;
+  /**
+   * `reduced` — the default — signs in, confirms the interface, reads the
+   * navigation structure and saves. Crawling every administrative screen is
+   * `full`, and is only worth running once the reduced path is fast.
+   */
+  mode?: 'reduced' | 'full';
+  totalMs?: number;
 }): Promise<DiscoveryRunResult> {
   const credentials = await resolveCredentials(input.organizationId);
+  const mode = input.mode ?? 'reduced';
 
   const walk = await discoverInterface(input.session, credentials.loginUrl, {
     maxStops: input.maxStops,
+    mode,
+    totalMs: input.totalMs,
   });
 
   const roots = rootStats(walk.evidence);
@@ -156,6 +186,7 @@ export async function runDiscovery(input: {
     // Screens actually confirmed while signed in. A login redirect captured
     // under a screen's name is not that screen.
     screensInspected: walk.screensConfirmed,
+    mode,
   });
 
   const missingMatchers = withoutMatchers.length
@@ -226,6 +257,8 @@ export async function runDiscovery(input: {
     evidence: walk.evidence,
   });
 
+  walk.trace.enter('profile_saved', `${profile.id} as ${profile.status}`);
+
   await recordEvent({
     organizationId: input.organizationId,
     type: 'readymode.interface_discovered',
@@ -249,9 +282,15 @@ export async function runDiscovery(input: {
   });
 
   invalidateProfileCache(input.organizationId);
+  walk.trace.enter('response_returned');
 
   return {
     profile,
+    workflow: walk.trace.report(),
+    authenticationSignals: walk.authenticationSignals,
+    mode: walk.mode,
+    withinBudget: walk.withinBudget,
+    profileSaved: true,
     visited: walk.visited,
     skipped: walk.skipped,
     panels: walk.panels,
@@ -265,6 +304,9 @@ export async function runDiscovery(input: {
       framesInspected: walk.evidence.pages.reduce((sum, entry) => sum + entry.roots.length, 0),
       screensConfirmed: walk.screensConfirmed,
       screensAttempted: walk.screensAttempted,
+      screensSkipped: walk.screensSkipped,
+      screensFailed: walk.screensFailed,
+      durationMs: walk.workflow.totalMs,
     },
     session: walk.session,
     authentication: walk.authentication,

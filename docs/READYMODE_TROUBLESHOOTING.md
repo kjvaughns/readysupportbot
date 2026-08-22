@@ -22,13 +22,54 @@ interface is not frame-based, or the frames had not loaded when the test ran.
 | `state: 'ambiguous'` | Several visible matches | Needs a more specific selector from discovery |
 | `source: 'builtin'` | Matched only a guess | Fine for reading, refused for changes. Run discovery |
 
+## Discovery never comes back
+
+It cannot any more: a run is budgeted at 90 seconds reduced, 240 seconds full,
+and 20 seconds per screen, so Browserbase's five-minute timeout is never what
+ends it. If a run does stop, the response says where.
+
+```bash
+curl -sX POST -H "Authorization: Bearer <owner-token>" \
+  -H "X-Organization-Id: <org>" https://<app>/api/readymode/discover \
+  | jq '.workflow, .authenticationSignals'
+```
+
+| Field | Read it as |
+| --- | --- |
+| `state` | the last transition reached |
+| `lastSuccessfulState` | the last one that completed |
+| `failingOperation` | what was in flight when it stopped |
+| `errorClass` / `errorMessage` | the class, and a sanitized message |
+| `screens.{attempted,confirmed,skipped,failed}` | what the crawl actually got |
+| `withinBudget` | false means it ran out of its own time, not Browserbase's |
+| `profileSaved` | a partial profile is saved even when screens fail |
+| `authenticationSignals.failed` | which of the four confirmation signals did not hold |
+
+The same trace is on stdout as `[Readymode Discovery] <state> +Nms`, one line
+per transition and one per screen, so a stuck run can be read from a log tail
+without waiting for a response.
+
+Start with the reduced run. It signs in, confirms the interface, reads the
+navigation structure and stops — the full crawl is only worth running once that
+is fast.
+
+```bash
+# reduced is the default; this is the explicit form
+curl -X POST -H "Authorization: Bearer <owner-token>" \
+  -H "X-Organization-Id: <org>" -H "Content-Type: application/json" \
+  -d '{"mode":"reduced"}' https://<app>/api/readymode/discover
+```
+
 ## Every change is refused with "controls unverified"
 
-Expected until a discovery profile is approved. Run:
+Expected until a discovery profile is approved. A reduced run cannot produce an
+approvable profile — it deliberately inspects nothing but the navigation
+structure — so run the full crawl:
 
 ```bash
 curl -X POST -H "Authorization: Bearer <owner-token>" \
-  -H "X-Organization-Id: <org>" https://<app>/api/readymode/discover
+  -H "X-Organization-Id: <org>" -H "Content-Type: application/json" \
+  -d '{"mode":"full"}' https://<app>/api/readymode/discover
 ```
 
 Review `proposals` and `unproposed`, then approve:

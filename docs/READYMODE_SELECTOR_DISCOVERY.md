@@ -30,15 +30,24 @@ rather than `visible`, so hidden duplicate panels — which legacy interfaces ke
 in the DOM — were counted as matches and pushed controls into a false
 "ambiguous, therefore unresolved" verdict.
 
+**4. The run had no budget of its own.** Discovery could outlive Browserbase's
+five-minute session timeout, so the platform's timeout became the error handler
+— and a platform timeout reports only that something took too long. Never which
+screen, never what it was doing.
+
 ## How discovery works now
 
 ```
 POST /api/readymode/discover        (Owner only, read-only)
-   │
+   │                                   {"mode": "reduced"}  ← the default
    ├─ capture the login page          ← before signing in, while the fields exist
    ├─ sign in                          ← handles the administrator session notice
-   ├─ capture the dashboard
-   ├─ follow safe navigation, capturing each stop
+   ├─ settle                           ← URL change / DOM change / network, first wins
+   ├─ confirm the interface            ← four signals, not one selector
+   ├─ read the navigation structure
+   │                                   ── reduced stops here ──
+   ├─ follow safe navigation, capturing each stop        (mode: "full")
+   ├─ walk each workflow                                 (mode: "full")
    │
    ├─ propose selectors from the evidence
    └─ store as a PROPOSED profile      ← not used for anything yet
@@ -46,6 +55,76 @@ POST /api/readymode/discover        (Owner only, read-only)
 POST /api/readymode/profiles/:id/approve   (Owner only)
    └─ the profile becomes ACTIVE and its selectors take effect
 ```
+
+### The reduced run is the default
+
+`reduced` does the minimum that proves the authenticated path works: sign in,
+get past the administrator session notice, confirm the interface, read the
+navigation structure, save, close. It crawls nothing and clicks nothing, and it
+is budgeted at ninety seconds.
+
+It is the default because a full crawl that cannot finish tells you less than a
+short one that does. Run `{"mode": "full"}` once the reduced run is fast.
+
+A reduced profile is always stored as `incomplete` — it has not seen enough of
+the interface to be approvable, and saying otherwise would be the login-only
+profile problem again in a different costume.
+
+### Confirming the interface
+
+Four independent signals, and which passed is reported:
+
+| Signal | What it says |
+| --- | --- |
+| `loginFormAbsent` | there is no password field on screen |
+| `existingSessionNoticeAbsent` | the Continue control is gone |
+| `urlIsNotLogin` | the address is no longer the login path |
+| `authenticatedMarkerPresent` | an interface-shell element is present |
+
+The session counts as authenticated when the first two hold and either of the
+last two does. One hardcoded dashboard selector was a single point of failure:
+a marker that does not render on a given account read as "not signed in" for
+every screen after it.
+
+Settling after the sign-in watches three things and takes whichever fires
+first — the address changing, the document being replaced, the network going
+quiet. It never waits on `networkidle` alone, because Readymode keeps
+background connections open and idle may never arrive.
+
+### The budget
+
+| Limit | Value |
+| --- | --- |
+| whole run, full | 240s |
+| whole run, reduced | 90s |
+| any one screen | 20s |
+| settle after sign-in | 8s |
+| confirm the interface | 20s |
+| screenshot | 5s |
+
+Every navigation, locator wait, frame inspection and screenshot runs under one
+of these. A screen that exceeds its allowance is recorded as `timeout` and
+skipped — never fatal to the crawl, because stopping over one slow screen loses
+every screen after it. Browserbase's five minutes is never reached.
+
+### What the run reports about itself
+
+Every transition is named and timestamped: `credentials_submitted`,
+`session_warning_detected`, `continue_clicked`, `post_login_navigation_started`,
+`authenticated_page_loaded`, `dashboard_confirmed`, `screen_discovery_started`,
+one event per navigation attempt, `screen_discovery_finished`, `profile_saved`,
+`response_returned`.
+
+The response carries the final state, the last successful state, the exact
+operation in flight if it stopped badly, the error class and a sanitized
+message, the screens attempted/confirmed/skipped/failed, the total duration,
+whether it stayed inside its budget, and whether a profile was saved. A partial
+profile is saved even when screens fail.
+
+The same transitions print to stdout as `[Readymode Discovery] <state> +Nms`,
+so a run that stops can be read from a raw log tail. Every line is structural —
+state names, screen keys, URL paths, durations, outcomes. No page text, no
+credentials, no personal data.
 
 ### What is collected
 
@@ -78,6 +157,14 @@ matching save, submit, apply, create, add, delete, remove, deactivate, reset,
 clear, sign out, import, charge, confirm, continue and similar — and requires a
 positive match against a navigation vocabulary. It never types into a field and
 never submits a form.
+
+Every click also passes `assertNotAdministrative`, which **throws** on Create,
+Save, Update, Delete, Reset Password, Clear License, Deactivate, Logout,
+assignment controls and the rest. Two independent checks on the same click is
+the point: the exact panel allowlist can be extended by someone who has not
+read the guard. And it throws rather than returning false because every click
+site wraps its work in `.catch(() => undefined)` — a refusal that returned
+false would be swallowed by exactly the code it protects.
 
 ## From evidence to selectors
 

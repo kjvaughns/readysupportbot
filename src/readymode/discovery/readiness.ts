@@ -55,6 +55,12 @@ export function assessReadiness(input: {
   dashboardConfirmed: boolean;
   /** Screens actually inspected after signing in. */
   screensInspected: number;
+  /**
+   * Which run this was. The reduced run deliberately inspects nothing but the
+   * navigation structure, so calling its profile "incomplete" without saying
+   * why reads as a failure when it is the intended result.
+   */
+  mode?: 'reduced' | 'full';
 }): ReadinessAssessment {
   const usable = new Set(
     input.proposals.filter(promotable).map((proposal) => proposal.control),
@@ -89,6 +95,21 @@ export function assessReadiness(input: {
         : loginOnly
           ? 'Only login controls were resolved. Signing in proves the credentials work and nothing else.'
           : 'No administrative screen was inspected after signing in.',
+    };
+  }
+
+  if (input.mode === 'reduced') {
+    return {
+      readiness: 'incomplete',
+      satisfied,
+      missing,
+      loginOnly,
+      unsupportedWorkflows,
+      undocumentedWorkflows,
+      summary:
+        'This was the reduced run: it confirmed the authenticated interface and read the ' +
+        'navigation structure, and deliberately crawled nothing. It is not meant to be ' +
+        'approvable — run discovery in full mode once this one is fast.',
     };
   }
 

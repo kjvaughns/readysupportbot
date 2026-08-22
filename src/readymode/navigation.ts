@@ -51,7 +51,7 @@ export async function gotoRoute(
   page: Page,
   route: string,
   expectHeadings: readonly string[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; navigationMs?: number } = {},
 ): Promise<OpenPanelResult> {
   let destination: string;
   try {
@@ -61,7 +61,12 @@ export async function gotoRoute(
   }
 
   try {
-    await page.goto(destination, { waitUntil: 'domcontentloaded' });
+    // An explicit limit, because Playwright's default is thirty seconds and a
+    // crawl of eleven screens can spend its entire budget on two of them.
+    await page.goto(destination, {
+      waitUntil: 'domcontentloaded',
+      timeout: options.navigationMs ?? 15_000,
+    });
   } catch {
     return { opened: false, heading: null, reason: `The route ${route} could not be reached.` };
   }

@@ -203,7 +203,17 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/readymode/discover', async (request) => {
     const context = await requireRole(request, ['owner']);
     const body = z
-      .object({ maxStops: z.coerce.number().int().min(1).max(20).optional() })
+      .object({
+        maxStops: z.coerce.number().int().min(1).max(20).optional(),
+        /**
+         * `reduced` is the default and is the only run worth making until it
+         * is fast: sign in, get past the session notice, confirm the
+         * interface, read the navigation structure, save, close. `full`
+         * crawls every administrative screen.
+         */
+        mode: z.enum(['reduced', 'full']).optional(),
+        totalMs: z.coerce.number().int().min(30_000).max(240_000).optional(),
+      })
       .parse(request.body ?? {});
 
     const session = await openSession(context.organizationId).catch(() => null);
@@ -220,6 +230,8 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
         organizationId: context.organizationId,
         discoveredBy: context.user.id,
         maxStops: body.maxStops,
+        mode: body.mode,
+        totalMs: body.totalMs,
       });
 
       return {
@@ -234,6 +246,46 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
           pagesCaptured: result.profile.pagesCaptured,
           controlsTotal: result.profile.controlsTotal,
           controlsProposed: result.profile.controlsProposed,
+        },
+        mode: result.mode,
+        /**
+         * The run as a finite-state workflow.
+         *
+         * Where it ended, where it last succeeded, what was in flight if it
+         * stopped badly, how long each screen took, and whether it stayed
+         * inside its own budget — so Browserbase's five-minute timeout is
+         * never the thing that explains a failure.
+         */
+        workflow: {
+          state: result.workflow.state,
+          lastSuccessfulState: result.workflow.lastSuccessfulState,
+          failingOperation: result.workflow.failingOperation,
+          errorClass: result.workflow.errorClass,
+          errorMessage: result.workflow.errorMessage,
+          totalMs: result.workflow.totalMs,
+          withinBudget: result.withinBudget,
+          profileSaved: result.profileSaved,
+          screens: {
+            attempted: result.workflow.screensAttempted,
+            confirmed: result.workflow.screensConfirmed,
+            skipped: result.workflow.screensSkipped,
+            failed: result.workflow.screensFailed,
+          },
+          events: result.workflow.events,
+        },
+        /**
+         * Which authentication signals passed and which did not.
+         *
+         * Four independent ones rather than a single hardcoded dashboard
+         * selector, because a marker that does not render on a given account
+         * used to read as "not signed in" for every screen after it.
+         */
+        authenticationSignals: result.authenticationSignals && {
+          passed: result.authenticationSignals.passed,
+          failed: result.authenticationSignals.failed,
+          confirmedBy: result.authenticationSignals.marker,
+          path: result.authenticationSignals.path,
+          authenticated: result.authenticationSignals.authenticated,
         },
         // -- what a person needs in order to review this run -------------
         //
@@ -354,6 +406,13 @@ export async function readymodeRoutes(app: FastifyInstance): Promise<void> {
             `${result.roots.failed > 0 ? ` (${result.roots.failed} unreadable)` : ''}.`,
           `Reached ${result.stageReached ?? 'no stage'}; the authenticated dashboard was ` +
             `${result.dashboardConfirmed ? 'confirmed' : 'NOT confirmed'}.`,
+          `Workflow ended at ${result.workflow.state ?? 'no state'} after ` +
+            `${Math.round(result.workflow.totalMs / 1000)}s` +
+            `${result.withinBudget ? '' : ', having run out of its own budget'}` +
+            `${result.workflow.failingOperation ? `; it stopped during ${result.workflow.failingOperation}.` : '.'}`,
+          result.mode === 'reduced'
+            ? 'This was the reduced run: no administrative screen was crawled.'
+            : '',
           `Confirmed ${result.totals.screensConfirmed} of ${result.totals.screensAttempted} screen(s) attempted.`,
           result.authenticationLostAt
             ? `The session was lost at ${result.authenticationLostAt} and the crawl stopped there.`

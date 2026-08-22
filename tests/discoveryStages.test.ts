@@ -461,15 +461,15 @@ describe('stage reporting', () => {
   it('reports the furthest stage a run reached', () => {
     expect(
       furthestStage([
-        { stage: 'login_page_inspected', reached: true, at: '' },
+        { stage: 'login_page_confirmed', reached: true, at: '' },
         { stage: 'credentials_submitted', reached: true, at: '' },
-        { stage: 'authenticated', reached: false, at: '' },
+        { stage: 'authenticated_dashboard_confirmed', reached: false, at: '' },
       ]),
     ).toBe('credentials_submitted');
   });
 
   it('reports nothing when even the login page was not inspected', () => {
-    expect(furthestStage([{ stage: 'login_page_inspected', reached: false, at: '' }])).toBeNull();
+    expect(furthestStage([{ stage: 'login_page_confirmed', reached: false, at: '' }])).toBeNull();
   });
 });
 

@@ -24,6 +24,8 @@ function root(overrides: Partial<RootEvidence> = {}): RootEvidence {
     links: [],
     forms: [],
     tables: [],
+    clickables: [],
+    headings: [],
     truncated: [],
     ...overrides,
   };
@@ -34,7 +36,7 @@ function evidence(roots: RootEvidence[], step = 'login'): InterfaceEvidence {
     schemaVersion: 1,
     capturedAt: '2026-01-01T00:00:00.000Z',
     baseUrl: 'https://rm.test/',
-    pages: [{ step, pageUrl: 'https://rm.test/', pageTitle: 'Readymode', roots, screenshotPath: null }],
+    pages: [{ step, pageUrl: 'https://rm.test/', pageTitle: 'Readymode', roots, screenshotPath: null, panelState: null }],
     redactions: { personalDataDropped: 0, passwordFieldsSeen: 0, truncatedCategories: [] },
   };
 }
